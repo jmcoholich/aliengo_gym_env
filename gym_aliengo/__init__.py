@@ -1,10 +1,10 @@
 from gym.envs.registration import register
 
 register(
-    id='foo-v0',
-    entry_point='gym_foo.envs:FooEnv',
+    id='aliengo-v0',
+    entry_point='gym_aliengo.envs:AliengoEnv',
 )
-register(
-    id='foo-extrahard-v0',
-    entry_point='gym_foo.envs:FooExtraHardEnv',
-)
+# register(
+#     id='aliengo-extrahard-v0',
+#     entry_point='gym_aliengo.envs:AliengoExtraHardEnv',
+# )

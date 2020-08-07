@@ -1,2 +1,2 @@
-from gym_foo.envs.foo_env import FooEnv
-from gym_foo.envs.foo_extrahard_env import FooExtraHardEnv
+from gym_aliengo.envs.aliengo_env import AliengoEnv
+# from gym_aliengo.envs.aliengo_extrahard_env import AliengoExtraHardEnv
