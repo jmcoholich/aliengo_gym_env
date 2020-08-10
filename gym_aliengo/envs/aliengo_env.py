@@ -50,7 +50,7 @@ class AliengoEnv(gym.Env):
         self.applied_torques = np.zeros(self.n_motors)
         self.previous_base_twist = np.zeros(6)
         self.previous_lower_limb_vels = np.zeros(4 * 6)
-        self.state_noise_std = 0.25 * np.array([3.14, 40] * 12 + [0.78] * 4)
+        self.state_noise_std = 0.003125 * 1e-9 * np.array([3.14 * 1e-8, 40* 0.25 * 1e-8] * 12 + [0.78 * 0.125] * 4)
 
 
         self._find_action_limits()
@@ -82,7 +82,7 @@ class AliengoEnv(gym.Env):
         else:
             done = False
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
-        return self.state + np.random.normal(scale=self.state_noise_std), self.reward, done, info
+        return self.state + 0 * np.random.normal(scale=self.state_noise_std), self.reward, done, info
 
         
     def reset(self):
