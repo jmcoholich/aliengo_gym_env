@@ -40,7 +40,7 @@ class AliengoEnv(gym.Env):
 
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
-        self.state_space_dim = 12 * 2 + 4 # pos and vel for each motor, plus base orientation (quaternions)
+        self.state_space_dim = 12 * 2 + 7 # pos and vel for each motor, plus base orientation (quaternions)
         self.action_space_dim =  12 * 2 
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
@@ -50,7 +50,8 @@ class AliengoEnv(gym.Env):
         self.applied_torques = np.zeros(self.n_motors)
         self.previous_base_twist = np.zeros(6)
         self.previous_lower_limb_vels = np.zeros(4 * 6)
-        self.state_noise_std = 0.003125 * 1e-9 * np.array([3.14 * 1e-8, 40* 0.25 * 1e-8] * 12 + [0.78 * 0.125] * 4)
+        self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
+        self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
 
 
         self._find_action_limits()
@@ -64,8 +65,8 @@ class AliengoEnv(gym.Env):
             )
 
         self.observation_space = spaces.Box(
-            low=np.concatenate((self.actions_lb, -0.78 * np.ones(4))),
-            high=np.concatenate((self.actions_ub, 0.78 * np.ones(4))),
+            low=np.concatenate((self.actions_lb, -0.78 * np.ones(7) * 1e2)),
+            high=np.concatenate((self.actions_ub, 0.78 * np.ones(7) * 1e2)),
             dtype=np.float32
             )
 
@@ -73,6 +74,8 @@ class AliengoEnv(gym.Env):
     def step(self, action):
         maxForces = 40 * np.ones(self.n_motors)
         p.setJointMotorControlArray(self.quadruped, self.motor_joint_indices, controlMode=p.POSITION_CONTROL, targetPositions=action[::2], targetVelocities=action[1::2], forces=maxForces)
+        if np.random.rand() > self.perturbation_rate: 
+            self._apply_perturbation()
         p.stepSimulation()
         self._update_state()
         self.reward = self._reward_function()
@@ -82,9 +85,19 @@ class AliengoEnv(gym.Env):
         else:
             done = False
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
-        return self.state + 0 * np.random.normal(scale=self.state_noise_std), self.reward, done, info
+        return self.state + np.random.normal(scale=self.state_noise_std), self.reward, done, info
 
-        
+    
+    def _apply_perturbation(self):
+        if np.random.rand() > 0.5: # apply force
+            force = tuple(10 * np.random.rand(3))
+            p.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
+        else: # apply torque
+            torque = tuple(0.5 * np.random.rand(3))
+            p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
+
+
+
     def reset(self):
 
         p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,0.48], ornObj=[0,0,0,1])
@@ -143,13 +156,16 @@ class AliengoEnv(gym.Env):
         lower_limb_vels = np.array([lower_limb_states[i][6] + lower_limb_states[i][7] for i in range(4)]).flatten()
         lower_limb_accel_penalty = np.power(lower_limb_vels - self.previous_lower_limb_vels, 2).mean()
 
+        lower_limb_height_bonus = np.array([lower_limb_states[i][0][2] for i in range(4)]).mean()
 
         # time.sleep(0.1)
 
         self.previous_base_twist = base_twist 
         self.previous_lower_limb_vels = lower_limb_vels
-        # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty)
-        return base_x_velocity - 0.0001 * torque_penalty - 0.01 * base_accel_penalty - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity)
+        # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
+        return base_x_velocity - 0.0001 * torque_penalty - 0.01 * base_accel_penalty \
+             - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) \
+             + 0.1 * lower_limb_height_bonus
 
 
     def _update_state(self):
@@ -175,8 +191,11 @@ class AliengoEnv(gym.Env):
 
         base_position_and_orientation = p.getBasePositionAndOrientation(self.quadruped)
         self.state[i+2], self.state[i+3], self.state[i+4], self.state[i+5] = base_position_and_orientation[1]
+        self.state[i+6] = base_position_and_orientation[0][0]
+        self.state[i+7] = base_position_and_orientation[0][1]
+        self.state[i+8] = base_position_and_orientation[0][2]
 
-        self.base_position = list(base_position_and_orientation[0])
+        self.base_position = np.array(list(base_position_and_orientation[0]))
 
         if np.isnan(self.state).any():
             print('nans in state')
@@ -188,6 +207,6 @@ class AliengoEnv(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.state[-4:])))) > 0.78).any() # 0.78 rad is 45 deg
+        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.state[-7:-3])))) > 0.78).any() # 0.78 rad is 45 deg
         return falling or height_out_of_bounds
 
