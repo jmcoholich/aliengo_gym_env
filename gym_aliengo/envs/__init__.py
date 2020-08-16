@@ -1,2 +1,3 @@
 from gym_aliengo.envs.aliengo_env import AliengoEnv
+from gym_aliengo.envs.minitaur_path_follow import MinitaurBulletEnv_PathFollow
 # from gym_aliengo.envs.aliengo_extrahard_env import AliengoExtraHardEnv

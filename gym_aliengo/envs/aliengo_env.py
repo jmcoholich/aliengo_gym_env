@@ -42,7 +42,7 @@ class AliengoEnv(gym.Env):
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
         self.state_space_dim = 12 * 3 + 4 # torque, pos, and vel for each motor, plus base orientation (quaternions)
-        self.action_space_dim =  12 * 2 
+        self.action_space_dim =  12 
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
 
@@ -57,9 +57,11 @@ class AliengoEnv(gym.Env):
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
         self.max_torque = 40
+        self.kp = 1.0
+        self.kd = 0.02
 
 
-        self._find_action_limits()
+        self._find_space_limits()
         self.num_envs = 1
 
         self.reward = 0 # this is to store most recent reward
@@ -70,17 +72,26 @@ class AliengoEnv(gym.Env):
             )
 
         self.observation_space = spaces.Box(
-            low=np.concatenate((-self.max_torque * np.ones(12), self.actions_lb, -0.78 * np.ones(4))),
-            high=np.concatenate((self.max_torque * np.ones(12), self.actions_ub, 0.78 * np.ones(4))),
+            low=np.concatenate((-self.max_torque * np.ones(12), self.actions_lb, -40 * np.ones(12), -0.78 * np.ones(4))),
+            high=np.concatenate((self.max_torque * np.ones(12), self.actions_ub, 40 * np.ones(12), 0.78 * np.ones(4))),
             dtype=np.float32
             )
 
 
     def step(self, action):
 
-        p.setJointMotorControlArray(self.quadruped, self.motor_joint_indices,
-            controlMode=p.POSITION_CONTROL, targetPositions=action[:12],
-            targetVelocities=action[12:], forces=self.max_torque * np.ones(self.n_motors))
+        action = np.clip(action, self.action_space.low, self.action_space.high)
+        # if not ((self.action_space.low <= action) & (action <= self.action_space.high)).all():
+        #     raise ValueError('Action is out-of-bounds') 
+
+
+        p.setJointMotorControlArray(self.quadruped,
+            self.motor_joint_indices,
+            controlMode=p.POSITION_CONTROL,
+            targetPositions=action,
+            forces=self.max_torque * np.ones(self.n_motors),
+            positionGains=self.kp * np.ones(12),
+            velocityGains=self.kd * np.ones(12))
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
             self._apply_perturbation()
@@ -105,7 +116,6 @@ class AliengoEnv(gym.Env):
             p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
 
 
-
     def reset(self):
 
         p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,0.48], ornObj=[0,0,0,1])
@@ -128,7 +138,7 @@ class AliengoEnv(gym.Env):
         pass
 
 
-    def _find_action_limits(self):
+    def _find_space_limits(self):
 
        
         for i in range(self.n_motors): 
@@ -140,8 +150,8 @@ class AliengoEnv(gym.Env):
             self.actions_ub[i] = joint_info[9]
             
             # bounds on joint velocity
-            self.actions_lb[i + 12] = - joint_info[11]
-            self.actions_ub[i + 12] =  joint_info[11]
+            # self.actions_lb[i + 12] = - joint_info[11]
+            # self.actions_ub[i + 12] =  joint_info[11]
 
         # no joint limits given for the thigh joints, so set them to plus/minus 90 degrees
         for i in range(self.action_space_dim):
@@ -173,8 +183,8 @@ class AliengoEnv(gym.Env):
         self.previous_base_twist = base_twist 
         self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return 2.0*base_x_velocity - 0.0001 * torque_penalty - 0.01 * base_accel_penalty \
-             - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
+        return 1.0*base_x_velocity - 0.0001 * torque_penalty #- 0.01 * base_accel_penalty \
+             # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
 
