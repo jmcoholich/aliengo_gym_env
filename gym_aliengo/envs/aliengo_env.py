@@ -10,7 +10,8 @@ import numpy as np
 class AliengoEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, render=False):
+    def __init__(self, render=True):
+        self._apply_perturbations = False
         self._render = render
 
         if self._render:
@@ -40,7 +41,7 @@ class AliengoEnv(gym.Env):
 
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
-        self.state_space_dim = 12 * 2 + 7 # pos and vel for each motor, plus base orientation (quaternions)
+        self.state_space_dim = 12 * 3 + 4 # torque, pos, and vel for each motor, plus base orientation (quaternions)
         self.action_space_dim =  12 * 2 
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
@@ -48,10 +49,14 @@ class AliengoEnv(gym.Env):
         self.state = np.zeros(self.state_space_dim)
         self.base_position = np.zeros(3) # not returned as observation, but used for other calculations
         self.applied_torques = np.zeros(self.n_motors)
+        self.joint_velocities = np.zeros(self.n_motors)
+        self.joint_positions = np.zeros(self.n_motors)
+        self.base_orientation = np.zeros(4)
         self.previous_base_twist = np.zeros(6)
         self.previous_lower_limb_vels = np.zeros(4 * 6)
-        self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
+        # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
+        self.max_torque = 40
 
 
         self._find_action_limits()
@@ -65,16 +70,19 @@ class AliengoEnv(gym.Env):
             )
 
         self.observation_space = spaces.Box(
-            low=np.concatenate((self.actions_lb, -0.78 * np.ones(7) * 1e2)),
-            high=np.concatenate((self.actions_ub, 0.78 * np.ones(7) * 1e2)),
+            low=np.concatenate((-self.max_torque * np.ones(12), self.actions_lb, -0.78 * np.ones(4))),
+            high=np.concatenate((self.max_torque * np.ones(12), self.actions_ub, 0.78 * np.ones(4))),
             dtype=np.float32
             )
 
 
     def step(self, action):
-        maxForces = 40 * np.ones(self.n_motors)
-        p.setJointMotorControlArray(self.quadruped, self.motor_joint_indices, controlMode=p.POSITION_CONTROL, targetPositions=action[::2], targetVelocities=action[1::2], forces=maxForces)
-        if np.random.rand() > self.perturbation_rate: 
+
+        p.setJointMotorControlArray(self.quadruped, self.motor_joint_indices,
+            controlMode=p.POSITION_CONTROL, targetPositions=action[:12],
+            targetVelocities=action[12:], forces=self.max_torque * np.ones(self.n_motors))
+
+        if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
             self._apply_perturbation()
         p.stepSimulation()
         self._update_state()
@@ -85,15 +93,15 @@ class AliengoEnv(gym.Env):
         else:
             done = False
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
-        return self.state + np.random.normal(scale=self.state_noise_std), self.reward, done, info
+        return self.state, self.reward, done, info
 
     
     def _apply_perturbation(self):
         if np.random.rand() > 0.5: # apply force
-            force = tuple(10 * np.random.rand(3))
+            force = tuple(10 * (np.random.rand(3) - 0.5))
             p.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
         else: # apply torque
-            torque = tuple(0.5 * np.random.rand(3))
+            torque = tuple(0.5 * (np.random.rand(3) - 0.5))
             p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
 
 
@@ -123,26 +131,28 @@ class AliengoEnv(gym.Env):
     def _find_action_limits(self):
 
        
-        for i in range(0, self.n_motors * 2, 2): 
-            joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[int(i/2)])
+        for i in range(self.n_motors): 
 
+            joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i])
+            
             # bounds on joint position
             self.actions_lb[i] = joint_info[8]
             self.actions_ub[i] = joint_info[9]
             
             # bounds on joint velocity
-            self.actions_lb[i + 1] = - joint_info[11]
-            self.actions_ub[i + 1] =  joint_info[11]
+            self.actions_lb[i + 12] = - joint_info[11]
+            self.actions_ub[i + 12] =  joint_info[11]
 
         # no joint limits given for the thigh joints, so set them to plus/minus 90 degrees
         for i in range(self.action_space_dim):
             if self.actions_ub[i] <= self.actions_lb[i]:
-                if i%2 == 0: # this is a position state
-                    self.actions_lb[i] = -3.14159 * 0
-                    self.actions_ub[i] = 3.14159 * 0.5
-                else: # this is a velocity (should not reach this using aliengo.urdf)
-                    self.actions_lb[i] = -40 
-                    self.action_ub[i] = 40
+                assert i < 12 # this is a position state
+                self.actions_lb[i] = -3.14159 * 0
+                self.actions_ub[i] = 3.14159 * 0.5
+                # else: # this is a velocity (should not reach this using aliengo.urdf)
+                #     assert False
+                #     # self.actions_lb[i] = -40 
+                #     # self.action_ub[i] = 40
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
@@ -156,46 +166,31 @@ class AliengoEnv(gym.Env):
         lower_limb_vels = np.array([lower_limb_states[i][6] + lower_limb_states[i][7] for i in range(4)]).flatten()
         lower_limb_accel_penalty = np.power(lower_limb_vels - self.previous_lower_limb_vels, 2).mean()
 
-        lower_limb_height_bonus = np.array([lower_limb_states[i][0][2] for i in range(4)]).mean()
+        # lower_limb_height_bonus = np.array([lower_limb_states[i][0][2] for i in range(4)]).mean()
 
         # time.sleep(0.1)
 
         self.previous_base_twist = base_twist 
         self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return base_x_velocity - 0.0001 * torque_penalty - 0.01 * base_accel_penalty \
-             - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) \
-             + 0.1 * lower_limb_height_bonus
+        return 2.0*base_x_velocity - 0.0001 * torque_penalty - 0.01 * base_accel_penalty \
+             - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
+             # + 0.1 * lower_limb_height_bonus
 
 
     def _update_state(self):
-        ''' 
-        Gets information about state of robot from simulation and fills in the state tensor. 
-        The state for the aliengo.urdf (from https://github.com/unitreerobotics/aliengo_pybullet) is the joint[0] position, joint[0] velocity, joint[1] position, ..., joint[11] velocity, then four values for global orientation of base in quaternions.
-        The order of the joint groups are FR (hip, thigh, calf), FL (hip, thigh, calf), RR then RL. 
-        This function also updates the applied joint torques that are penalized in the _reward_function.
-
-        '''
 
         joint_states = list(p.getJointStates(self.quadruped, self.motor_joint_indices))
-        self.applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)])
+        self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
 
-        for i in range(0, self.n_motors * 2, 2):
-            self.state[i] = joint_states[int(i/2)][0]
-            self.state[i+1] = joint_states[int(i/2)][1]
+        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped)
 
+        self.base_position = np.array(base_position)
+        self.base_orientation = np.array(base_orientation)
 
-        # base_state = p.getLinkState(self.quadruped, 0, computeLinkVelocity=0) 
-        # self.state[i+2], self.state[i+3], self.state[i+4] = base_state[0]  
-        # self.state[i+5], self.state[i+6], self.state[i+7], self.state[i+8] = base_state[1]
-
-        base_position_and_orientation = p.getBasePositionAndOrientation(self.quadruped)
-        self.state[i+2], self.state[i+3], self.state[i+4], self.state[i+5] = base_position_and_orientation[1]
-        self.state[i+6] = base_position_and_orientation[0][0]
-        self.state[i+7] = base_position_and_orientation[0][1]
-        self.state[i+8] = base_position_and_orientation[0][2]
-
-        self.base_position = np.array(list(base_position_and_orientation[0]))
+        self.state = np.concatenate((self.applied_torques, self.joint_positions, self.joint_velocities, self.base_orientation))
 
         if np.isnan(self.state).any():
             print('nans in state')
@@ -207,6 +202,6 @@ class AliengoEnv(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.state[-7:-3])))) > 0.78).any() # 0.78 rad is 45 deg
+        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.base_orientation)))) > 0.78).any() # 0.78 rad is 45 deg
         return falling or height_out_of_bounds
 
