@@ -10,11 +10,11 @@ import numpy as np
 class AliengoEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, render=True):
+    def __init__(self, render=False):
         self._apply_perturbations = False
-        self._render = render
+        self._is_render = render
 
-        if self._render:
+        if self._is_render:
             p.connect(p.GUI)
         else:
             p.connect(p.DIRECT)
@@ -80,9 +80,9 @@ class AliengoEnv(gym.Env):
 
     def step(self, action):
 
-        action = np.clip(action, self.action_space.low, self.action_space.high)
-        # if not ((self.action_space.low <= action) & (action <= self.action_space.high)).all():
-        #     raise ValueError('Action is out-of-bounds') 
+        # action = np.clip(action, self.action_space.low, self.action_space.high)
+        if not ((self.action_space.low <= action) & (action <= self.action_space.high)).all():
+            raise ValueError('Action is out-of-bounds') 
 
 
         p.setJointMotorControlArray(self.quadruped,

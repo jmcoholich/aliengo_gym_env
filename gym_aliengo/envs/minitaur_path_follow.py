@@ -47,6 +47,7 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
 
   def __init__(
       self,
+      render=False,
       urdf_root=pybullet_data.getDataPath(),
       action_repeat=1,
       distance_weight=1.0,
@@ -66,7 +67,6 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
       motor_overheat_protection=True,
       hard_reset=True,
       on_rack=False,
-      render=False,
       kd_for_pd_controllers=0.3,
       env_randomizer=minitaur_env_randomizer.MinitaurEnvRandomizer()):
     """Initialize the minitaur gym environment.
@@ -146,13 +146,15 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
 
     if self._is_render:
       self._pybullet_client = bc.BulletClient(connection_mode=pybullet.GUI)
+
+      pybullet.addUserDebugLine([0,0,0], [3,1,0], lineWidth=400.0, lifeTime=0, lineColorRGB=[0,0,0])
     else:
       self._pybullet_client = bc.BulletClient()
 
     self.seed()
     self.reset()
-    observation_high = (self.minitaur.GetObservationUpperBound() + OBSERVATION_EPS)
-    observation_low = (self.minitaur.GetObservationLowerBound() - OBSERVATION_EPS)
+    observation_high = np.concatenate((self.minitaur.GetObservationUpperBound() + OBSERVATION_EPS, [np.inf, np.inf]))
+    observation_low = np.concatenate((self.minitaur.GetObservationLowerBound() - OBSERVATION_EPS, [-np.inf, -np.inf]))
     action_dim = 8
     action_high = np.array([self._action_bound] * action_dim)
     self.action_space = spaces.Box(-action_high, action_high, dtype=np.float32)
@@ -198,6 +200,9 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
     if self._env_randomizer is not None:
       self._env_randomizer.randomize_env(self)
 
+    if self._is_render:
+      self._draw_path()
+
     self._env_step_counter = 0
     self._last_base_position = [0, 0, 0]
     self._objectives = []
@@ -216,12 +221,23 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
 
   def _transform_action_to_motor_command(self, action):
     if self._leg_model_enabled:
-      for i, action_component in enumerate(action):
-        if not (-self._action_bound - ACTION_EPS <= action_component <=
-                self._action_bound + ACTION_EPS):
-          raise ValueError("{}th action {} out of bounds.".format(i, action_component))
+      # commented out because I added action clipping in self.step()
+      # for i, action_component in enumerate(action):
+        # if not (-self._action_bound - ACTION_EPS <= action_component <=
+        #         self._action_bound + ACTION_EPS):
+        #   raise ValueError("{}th action {} out of bounds.".format(i, action_component))
       action = self.minitaur.ConvertFromLegModel(action)
     return action
+  
+  def _draw_path(self):
+    n_points = 25
+    x = np.linspace(0, 10, n_points)
+    path_ub = 3 * np.sin(np.pi / 5 * x) + 1.0
+    path_lb = 3 * np.sin(np.pi / 5 * x) - 1.0
+
+    for i in range(n_points - 1):
+      pybullet.addUserDebugLine([x[i], path_ub[i], 0], [x[i + 1], path_ub[i + 1], 0], lifeTime=0, lineWidth=5., lineColorRGB=[0,0,0])
+      pybullet.addUserDebugLine([x[i], path_lb[i], 0], [x[i + 1], path_lb[i + 1], 0], lifeTime=0, lineWidth=5., lineColorRGB=[0,0,0])
 
   def step(self, action):
     """Step forward the simulation, given the action.
@@ -243,6 +259,7 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
     # Clip actions, since Kostrikov implementation doesn't clip them in advance or apply tanh() on output
 
     action = np.clip(action, self.action_space.low, self.action_space.high)
+
     if self._is_render:
       # Sleep, otherwise the computation takes less time than real time,
       # which will make the visualization like a fast-forward video.
@@ -353,13 +370,20 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
     return (np.dot(np.asarray([0, 0, 1]), np.asarray(local_up)) < 0.85 or pos[2] < 0.13)
 
   def _termination(self):
-    position = self.minitaur.GetBasePosition()
-    distance = math.sqrt(position[0]**2 + position[1]**2)
-    return self.is_fallen() or distance > self._distance_limit
+    x, y, z = self.minitaur.GetBasePosition()
+    distance = math.sqrt(x**2 + y**2)
+    # path center is y = 4 * sin(pi/5 * x)
+    path_ub = 3 * np.sin(np.pi / 5 * x) + 1.0
+    path_lb = 3 * np.sin(np.pi / 5 * x) - 1.0
+    is_on_path = path_lb < y < path_ub
+    goal_reached = x >= 10
+    return self.is_fallen() or distance > self._distance_limit or not is_on_path or goal_reached
 
   def _reward(self):
     current_base_position = self.minitaur.GetBasePosition()
-    forward_reward = current_base_position[0] - self._last_base_position[0]
+    current_goal_distance = ((current_base_position[0]- 10)**2 + (current_base_position[1]- 0)**2 )**0.5
+    last_goal_distance = ((self._last_base_position[0]- 10)**2 + (self._last_base_position[1]- 0)**2 )**0.5
+    forward_reward = last_goal_distance - current_goal_distance 
     drift_reward = -abs(current_base_position[1] - self._last_base_position[1])
     shake_reward = -abs(current_base_position[2] - self._last_base_position[2])
     self._last_base_position = current_base_position
@@ -385,7 +409,10 @@ class MinitaurBulletEnv_PathFollow(gym.Env):
       observation += (
           np.random.normal(scale=self._observation_noise_stdev, size=observation.shape) *
           self.minitaur.GetObservationUpperBound())
-    return observation
+
+    # add x and y position to the observation for path following
+    x, y, _  = self.minitaur.GetBasePosition()   
+    return np.concatenate((observation, [x], [y]))
 
   if parse_version(gym.__version__) < parse_version('0.9.6'):
     _render = render
