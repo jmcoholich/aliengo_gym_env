@@ -1,5 +1,7 @@
 """This file implements the gym environment of minitaur.
 
+/home/jcoholich/anaconda3/envs/kostrikov/lib/python3.7/site-packages/pybullet_envs/bullet/minitaur.py
+
 """
 
 import os, inspect

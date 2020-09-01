@@ -129,9 +129,39 @@ class AliengoEnv(gym.Env):
 
     def render(self, mode='human'):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
+        RENDER_WIDTH = 960 * 2
+        RENDER_HEIGHT = 720 * 2
 
-        # self.render = True
-        pass 
+        # RENDER_WIDTH = 1920
+        # RENDER_HEIGHT = 1080
+
+        if mode == 'rgb_array':
+            base_pos, _ = p.getBasePositionAndOrientation(self.quadruped)
+            # base_pos = self.minitaur.GetBasePosition()
+            view_matrix = p.computeViewMatrixFromYawPitchRoll(
+                cameraTargetPosition=base_pos,
+                distance=2.0,
+                yaw=0,
+                pitch=-30.,
+                roll=0,
+                upAxisIndex=2)
+            proj_matrix = p.computeProjectionMatrixFOV(fov=60,
+                aspect=float(RENDER_WIDTH) /
+                RENDER_HEIGHT,
+                nearVal=0.1,
+                farVal=100.0)
+            
+            _, _, px, _, _ = p.getCameraImage(width=RENDER_WIDTH,
+                height=RENDER_HEIGHT,
+                viewMatrix=view_matrix,
+                projectionMatrix=proj_matrix,
+                renderer=p.ER_BULLET_HARDWARE_OPENGL)
+            rgb_array = np.array(px)
+            rgb_array = rgb_array[:, :, :3]
+            return rgb_array
+
+        else: 
+            return
 
 
     def close(self):
