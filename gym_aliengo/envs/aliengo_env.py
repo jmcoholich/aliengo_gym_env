@@ -8,7 +8,6 @@ import time
 import numpy as np
 
 class AliengoEnv(gym.Env):
-    metadata = {'render.modes': ['human']}
 
     def __init__(self, render=False):
         self._apply_perturbations = False
@@ -21,8 +20,12 @@ class AliengoEnv(gym.Env):
 
         urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
+        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+        #     basePosition=[0,0,0.48],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=False)
+
+        # TODO delete and reenable other one    
         self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-            basePosition=[0,0,0.48],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=False)
+            basePosition=[0,0,1.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True)
 
         p.setGravity(0,0,-9.8)
         self.lower_legs = [2,5,8,11]
@@ -45,20 +48,22 @@ class AliengoEnv(gym.Env):
         self.action_space_dim =  12 
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
+        self.observations_ub = np.empty(self.state_space_dim)
+        self.observations_lb = np.empty(self.state_space_dim)
 
         self.state = np.zeros(self.state_space_dim)
-        self.base_position = np.zeros(3) # not returned as observation, but used for other calculations
         self.applied_torques = np.zeros(self.n_motors)
         self.joint_velocities = np.zeros(self.n_motors)
         self.joint_positions = np.zeros(self.n_motors)
         self.base_orientation = np.zeros(4)
+        self.base_position = np.zeros(3) # not returned as observation, but used for other calculations
         self.previous_base_twist = np.zeros(6)
         self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
         self.max_torque = 40
-        self.kp = 1.0
-        self.kd = 0.02
+        self.kp = 1.0 * 2 
+        self.kd = 0.02 * 2
 
 
         self._find_space_limits()
@@ -72,8 +77,8 @@ class AliengoEnv(gym.Env):
             )
 
         self.observation_space = spaces.Box(
-            low=np.concatenate((-self.max_torque * np.ones(12), self.actions_lb, -40 * np.ones(12), -0.78 * np.ones(4))),
-            high=np.concatenate((self.max_torque * np.ones(12), self.actions_ub, 40 * np.ones(12), 0.78 * np.ones(4))),
+            low=self.observations_lb,
+            high=self.observations_ub,
             dtype=np.float32
             )
 
@@ -118,7 +123,7 @@ class AliengoEnv(gym.Env):
 
     def reset(self):
 
-        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,0.48], ornObj=[0,0,0,1])
+        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,1.0], ornObj=[0,0,0,1]) # TODO change back
         for i in self.motor_joint_indices: # for some reason there is no p.resetJointStates
             p.resetJointState(self.quadruped, i, 0, 0)
         self._update_state()
@@ -129,8 +134,8 @@ class AliengoEnv(gym.Env):
 
     def render(self, mode='human'):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
-        RENDER_WIDTH = 960 * 2
-        RENDER_HEIGHT = 720 * 2
+        RENDER_WIDTH = 960 
+        RENDER_HEIGHT = 720
 
         # RENDER_WIDTH = 1920
         # RENDER_HEIGHT = 1080
@@ -169,8 +174,9 @@ class AliengoEnv(gym.Env):
 
 
     def _find_space_limits(self):
+        ''' find upper and lower bounds of action and observation spaces''' 
 
-       
+       # find bounds of action space 
         for i in range(self.n_motors): 
 
             joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i])
@@ -179,20 +185,27 @@ class AliengoEnv(gym.Env):
             self.actions_lb[i] = joint_info[8]
             self.actions_ub[i] = joint_info[9]
             
-            # bounds on joint velocity
-            # self.actions_lb[i + 12] = - joint_info[11]
-            # self.actions_ub[i + 12] =  joint_info[11]
 
         # no joint limits given for the thigh joints, so set them to plus/minus 90 degrees
         for i in range(self.action_space_dim):
             if self.actions_ub[i] <= self.actions_lb[i]:
-                assert i < 12 # this is a position state
-                self.actions_lb[i] = -3.14159 * 0
+                self.actions_lb[i] = -3.14159 * 0.5
                 self.actions_ub[i] = 3.14159 * 0.5
-                # else: # this is a velocity (should not reach this using aliengo.urdf)
-                #     assert False
-                #     # self.actions_lb[i] = -40 
-                #     # self.action_ub[i] = 40
+
+        self.actions_ub[2::3] = 0.0
+        self.actions_lb[7] = -self.actions_lb[7]  
+
+        # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation)
+        self.observations_lb = np.concatenate((-self.max_torque * np.ones(12), 
+            self.actions_lb,
+             -40 * np.ones(12), 
+            -0.78 * np.ones(4)))
+
+        self.observations_ub = np.concatenate((self.max_torque * np.ones(12), 
+            self.actions_ub, 
+            40 * np.ones(12), 
+            0.78 * np.ones(4)))
+
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
@@ -213,7 +226,7 @@ class AliengoEnv(gym.Env):
         self.previous_base_twist = base_twist 
         self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return 1.0*base_x_velocity - 0.0001 * torque_penalty #- 0.01 * base_accel_penalty \
+        return 1.0*base_x_velocity #- 0.0001 * torque_penalty #- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
