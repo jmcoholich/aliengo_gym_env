@@ -20,12 +20,12 @@ class AliengoEnv(gym.Env):
 
         urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-        #     basePosition=[0,0,0.48],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=False)
-
-        # TODO delete and reenable other one    
         self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-            basePosition=[0,0,1.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True)
+            basePosition=[0,0,0.48],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=False)
+
+        # fixed base for debugging 
+        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+        #     basePosition=[0,0,1.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True)
 
         p.setGravity(0,0,-9.8)
         self.lower_legs = [2,5,8,11]
@@ -36,7 +36,6 @@ class AliengoEnv(gym.Env):
                     # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0)[12],p.getJointInfo(self.quadruped,l1)[12], "enabled=",enableCollision)
                     p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision)
 
-        # p.getCameraImage(480,320)
         p.setRealTimeSimulation(0)
 
         for i in range (p.getNumJoints(self.quadruped)):
@@ -62,8 +61,8 @@ class AliengoEnv(gym.Env):
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
         self.max_torque = 40
-        self.kp = 1.0 * 2 
-        self.kd = 0.02 * 2
+        self.kp = 1.0 
+        self.kd = 0.02
 
 
         self._find_space_limits()
@@ -123,7 +122,7 @@ class AliengoEnv(gym.Env):
 
     def reset(self):
 
-        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,1.0], ornObj=[0,0,0,1]) # TODO change back
+        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,1.0], ornObj=[0,0,0,0.48]) 
         for i in self.motor_joint_indices: # for some reason there is no p.resetJointStates
             p.resetJointState(self.quadruped, i, 0, 0)
         self._update_state()
@@ -192,8 +191,6 @@ class AliengoEnv(gym.Env):
                 self.actions_lb[i] = -3.14159 * 0.5
                 self.actions_ub[i] = 3.14159 * 0.5
 
-        self.actions_ub[2::3] = 0.0
-        self.actions_lb[7] = -self.actions_lb[7]  
 
         # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation)
         self.observations_lb = np.concatenate((-self.max_torque * np.ones(12), 
