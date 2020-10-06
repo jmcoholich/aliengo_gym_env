@@ -62,7 +62,7 @@ class AliengoEnv(gym.Env):
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
         self.max_torque = 40
         self.kp = 1.0 
-        self.kd = 0.02
+        self.kd = 1.0
 
 
         self._find_space_limits()
@@ -122,7 +122,7 @@ class AliengoEnv(gym.Env):
 
     def reset(self):
 
-        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,1.0], ornObj=[0,0,0,0.48]) 
+        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,0.48], ornObj=[0,0,0,1.0]) 
         for i in self.motor_joint_indices: # for some reason there is no p.resetJointStates
             p.resetJointState(self.quadruped, i, 0, 0)
         self._update_state()
@@ -215,15 +215,14 @@ class AliengoEnv(gym.Env):
         lower_limb_states = list(p.getLinkStates(self.quadruped, self.lower_legs, computeLinkVelocity=True))
         lower_limb_vels = np.array([lower_limb_states[i][6] + lower_limb_states[i][7] for i in range(4)]).flatten()
         lower_limb_accel_penalty = np.power(lower_limb_vels - self.previous_lower_limb_vels, 2).mean()
+        orientation =  np.array(list(p.getEulerFromQuaternion(self.base_orientation)))
 
         # lower_limb_height_bonus = np.array([lower_limb_states[i][0][2] for i in range(4)]).mean()
-
-        # time.sleep(0.1)
-
+        orientation_pen = np.sum(np.power(orientation, 2))
         self.previous_base_twist = base_twist 
         self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return 1.0*base_x_velocity #- 0.0001 * torque_penalty #- 0.01 * base_accel_penalty \
+        return 1.0*base_x_velocity - 0.00001 * torque_penalty -0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
@@ -252,6 +251,6 @@ class AliengoEnv(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.base_orientation)))) > 0.78).any() # 0.78 rad is 45 deg
+        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.base_orientation)))) > 2 * 0.78).any() # 0.78 rad is 45 deg
         return falling or height_out_of_bounds
 
