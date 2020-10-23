@@ -83,6 +83,7 @@ class AliengoEnv(gym.Env):
 
 
     def step(self, action):
+        # print(self.motor_joint_indices)
 
         # action = np.clip(action, self.action_space.low, self.action_space.high)
         if not ((self.action_space.low <= action) & (action <= self.action_space.high)).all():
@@ -133,8 +134,12 @@ class AliengoEnv(gym.Env):
 
     def render(self, mode='human'):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
-        RENDER_WIDTH = 960 
-        RENDER_HEIGHT = 720
+
+        RENDER_WIDTH = 480 
+        RENDER_HEIGHT = 360
+
+        # RENDER_WIDTH = 960 
+        # RENDER_HEIGHT = 720
 
         # RENDER_WIDTH = 1920
         # RENDER_HEIGHT = 1080
@@ -253,4 +258,48 @@ class AliengoEnv(gym.Env):
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
         falling = (abs(np.array(list(p.getEulerFromQuaternion(self.base_orientation)))) > 2 * 0.78).any() # 0.78 rad is 45 deg
         return falling or height_out_of_bounds
+
+
+# perform sanity check just feeding in the default trajectory into the aliengo robot, and save video
+
+# to do- raise the fps of the video again, and just see what it
+# does when I send no position command and just step -- does 
+# it still jump like that? eliminate that
+if __name__ == '__main__':
+    import cv2
+    env = gym.make('gym_aliengo:aliengo-v0')
+    env.reset()
+    img = env.render('rgb_array')
+    img_list = [img]
+    counter = 0
+    with open('mocap.txt','r') as filestream:
+        for line in filestream:
+            positions = [float(x) for x in line.split(',')[2:]]
+            env.step(positions)
+            if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
+                img = env.render('rgb_array')
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                img_list.append(img)
+            counter +=1
+            # if counter ==100:
+            #     break
+
+    height, width, layers = img.shape
+    size = (width, height)
+    out = cv2.VideoWriter('mocap_test_vid.avi', cv2.VideoWriter_fourcc(*'XVID'), 60, size)
+
+    for img in img_list:
+        out.write(img)
+    out.release()
+
+    print('Video saved')
+
+
+    
+    
+
+
+
+    
+
 
