@@ -37,6 +37,7 @@ class AliengoEnv(gym.Env):
                     p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision)
 
         p.setRealTimeSimulation(0)
+        p.setTimeStep(1/240.)
 
         for i in range (p.getNumJoints(self.quadruped)):
             p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5)
@@ -60,7 +61,7 @@ class AliengoEnv(gym.Env):
         self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
-        self.max_torque = 40
+        self.max_torque = 100
         self.kp = 1.0 
         self.kd = 1.0
 
@@ -122,13 +123,25 @@ class AliengoEnv(gym.Env):
 
 
     def reset(self):
+        '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
+        prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
+        to ground and settle completely.'''
 
+        starting_pos = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
+          -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
         p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,0.48], ornObj=[0,0,0,1.0]) 
-        for i in self.motor_joint_indices: # for some reason there is no p.resetJointStates
-            p.resetJointState(self.quadruped, i, 0, 0)
+        for i in range(self.n_motors): # for some reason there is no p.resetJointStates
+            p.resetJointState(self.quadruped, self.motor_joint_indices[i], starting_pos[i], 0)
+        p.setJointMotorControlArray(self.quadruped,
+            self.motor_joint_indices,
+            controlMode=p.POSITION_CONTROL,
+            targetPositions=starting_pos,
+            forces=self.max_torque * np.ones(self.n_motors),
+            positionGains=self.kp * np.ones(12),
+            velocityGains=self.kd * np.ones(12))
+        for i in range(40):
+            p.stepSimulation()
         self._update_state()
-
-
         return self.state
 
 
@@ -260,20 +273,37 @@ class AliengoEnv(gym.Env):
         return falling or height_out_of_bounds
 
 
-# perform sanity check just feeding in the default trajectory into the aliengo robot, and save video
-
-# to do- raise the fps of the video again, and just see what it
-# does when I send no position command and just step -- does 
-# it still jump like that? eliminate that
 if __name__ == '__main__':
+    '''Perform check by feeding in the mocap trajectory provided by Unitree (linked) into the aliengo robot and
+    save video. https://github.com/unitreerobotics/aliengo_pybullet'''
+
     import cv2
     env = gym.make('gym_aliengo:aliengo-v0')
     env.reset()
     img = env.render('rgb_array')
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     img_list = [img]
     counter = 0
-    with open('mocap.txt','r') as filestream:
-        for line in filestream:
+
+    # for i in range(200):
+    #     p.stepSimulation()
+    #     img = env.render('rgb_array')
+    #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    #     img_list.append(img)
+
+    # with open('mocap.txt','r') as f:
+    #     env.step([float(x) for x in f.readline().split(',')[2:]])
+    # img = env.render('rgb_array')
+    # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    # img_list.append(img)
+    # for i in range(200):
+    #     p.stepSimulation()
+    #     img = env.render('rgb_array')
+    #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    #     img_list.append(img)
+        
+    with open('mocap.txt','r') as f:
+        for line in f:
             positions = [float(x) for x in line.split(',')[2:]]
             env.step(positions)
             if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
@@ -286,12 +316,11 @@ if __name__ == '__main__':
 
     height, width, layers = img.shape
     size = (width, height)
-    out = cv2.VideoWriter('mocap_test_vid.avi', cv2.VideoWriter_fourcc(*'XVID'), 60, size)
+    out = cv2.VideoWriter('test_vid.avi', cv2.VideoWriter_fourcc(*'XVID'), 60, size)
 
     for img in img_list:
         out.write(img)
     out.release()
-
     print('Video saved')
 
 
