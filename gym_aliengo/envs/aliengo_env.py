@@ -6,7 +6,24 @@ import pybullet as p
 import os
 import time
 import numpy as np
+from cv2 import putText, FONT_HERSHEY_SIMPLEX
 
+'''Agent can be trained with PPO algorithm from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail. Run:
+ python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay --use-proper-time-limits
+
+
+Things to try
+- hyperparam sweep
+- get simulation GUI on my laptop and probe it so I know pm 1 produces desired range of motion 
+
+
+Things I have tried
+- normalize action space to fall within pm 1
+- changing max torque available 
+- making sure my changes to avoid jumping on startup were realized (pip install -e .)
+- printing reward function to video
+- letting train longer
+ '''
 class AliengoEnv(gym.Env):
 
     def __init__(self, render=False):
@@ -45,9 +62,11 @@ class AliengoEnv(gym.Env):
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
         self.state_space_dim = 12 * 3 + 4 # torque, pos, and vel for each motor, plus base orientation (quaternions)
-        self.action_space_dim =  12 
+        self.action_space_dim = 12 
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
+        self.action_mean = np.empty(self.action_space_dim)
+        self.action_range = np.empty(self.action_space_dim)
         self.observations_ub = np.empty(self.state_space_dim)
         self.observations_lb = np.empty(self.state_space_dim)
 
@@ -61,9 +80,10 @@ class AliengoEnv(gym.Env):
         self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
-        self.max_torque = 100
+        self.max_torque = 40
         self.kp = 1.0 
         self.kd = 1.0
+
 
 
         self._find_space_limits()
@@ -71,8 +91,8 @@ class AliengoEnv(gym.Env):
 
         self.reward = 0 # this is to store most recent reward
         self.action_space = spaces.Box(
-            low=self.actions_lb,
-            high=self.actions_ub,
+            low=-np.ones(self.action_space_dim),
+            high=np.ones(self.action_space_dim),
             dtype=np.float32
             )
 
@@ -87,14 +107,13 @@ class AliengoEnv(gym.Env):
         # print(self.motor_joint_indices)
 
         # action = np.clip(action, self.action_space.low, self.action_space.high)
-        if not ((self.action_space.low <= action) & (action <= self.action_space.high)).all():
+        if not ((-1.0 <= action) & (action <= 1.0)).all():
             raise ValueError('Action is out-of-bounds') 
-
 
         p.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
-            targetPositions=action,
+            targetPositions=self._actions_to_positions(action),
             forces=self.max_torque * np.ones(self.n_motors),
             positionGains=self.kp * np.ones(12),
             velocityGains=self.kd * np.ones(12))
@@ -151,6 +170,8 @@ class AliengoEnv(gym.Env):
         RENDER_WIDTH = 480 
         RENDER_HEIGHT = 360
 
+        base_x_velocity = np.array(p.getBaseVelocity(self.quadruped)).flatten()[0]
+
         # RENDER_WIDTH = 960 
         # RENDER_HEIGHT = 720
 
@@ -172,7 +193,7 @@ class AliengoEnv(gym.Env):
                 RENDER_HEIGHT,
                 nearVal=0.1,
                 farVal=100.0)
-            
+
             _, _, px, _, _ = p.getCameraImage(width=RENDER_WIDTH,
                 height=RENDER_HEIGHT,
                 viewMatrix=view_matrix,
@@ -180,7 +201,9 @@ class AliengoEnv(gym.Env):
                 renderer=p.ER_BULLET_HARDWARE_OPENGL)
             rgb_array = np.array(px)
             rgb_array = rgb_array[:, :, :3]
-            return rgb_array
+            img = putText(np.float32(rgb_array), str(base_x_velocity)[:6], (100, 100), FONT_HERSHEY_SIMPLEX, 
+                            0.5, (0,0,0))
+            return np.uint8(img)
 
         else: 
             return
@@ -189,26 +212,33 @@ class AliengoEnv(gym.Env):
     def close(self):
         pass
 
+    def _positions_to_actions(self, positions):
+        return (positions - self.action_mean) / self.action_range
+  
+
+    def _actions_to_positions(self, actions):
+        return actions * self.action_range + self.action_mean
+
 
     def _find_space_limits(self):
         ''' find upper and lower bounds of action and observation spaces''' 
 
        # find bounds of action space 
         for i in range(self.n_motors): 
-
             joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i])
             
             # bounds on joint position
             self.actions_lb[i] = joint_info[8]
             self.actions_ub[i] = joint_info[9]
             
-
         # no joint limits given for the thigh joints, so set them to plus/minus 90 degrees
         for i in range(self.action_space_dim):
             if self.actions_ub[i] <= self.actions_lb[i]:
                 self.actions_lb[i] = -3.14159 * 0.5
                 self.actions_ub[i] = 3.14159 * 0.5
 
+        self.action_mean = (self.actions_ub + self.actions_lb)/2 
+        self.action_range = self.actions_ub - self.actions_lb
 
         # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation)
         self.observations_lb = np.concatenate((-self.max_torque * np.ones(12), 
@@ -220,6 +250,8 @@ class AliengoEnv(gym.Env):
             self.actions_ub, 
             40 * np.ones(12), 
             0.78 * np.ones(4)))
+        
+
 
 
     def _reward_function(self) -> float:
@@ -240,7 +272,7 @@ class AliengoEnv(gym.Env):
         self.previous_base_twist = base_twist 
         self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return 1.0*base_x_velocity - 0.00001 * torque_penalty -0.01*orientation_pen#- 0.01 * base_accel_penalty \
+        return 1.0*base_x_velocity - 0.00001 * torque_penalty #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
@@ -292,7 +324,7 @@ if __name__ == '__main__':
     #     img_list.append(img)
 
     # with open('mocap.txt','r') as f:
-    #     env.step([float(x) for x in f.readline().split(',')[2:]])
+    #     env.step(env._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32)))
     # img = env.render('rgb_array')
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     # img_list.append(img)
@@ -304,7 +336,7 @@ if __name__ == '__main__':
         
     with open('mocap.txt','r') as f:
         for line in f:
-            positions = [float(x) for x in line.split(',')[2:]]
+            positions =  env._positions_to_actions(np.array(line.split(',')[2:], dtype=np.float32))
             env.step(positions)
             if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
                 img = env.render('rgb_array')
