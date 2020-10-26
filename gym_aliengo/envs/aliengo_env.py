@@ -15,6 +15,8 @@ from cv2 import putText, FONT_HERSHEY_SIMPLEX
 Things to try
 - hyperparam sweep
 - get simulation GUI on my laptop and probe it so I know pm 1 produces desired range of motion 
+- plot entropy (I know the PPO kostrikov is logging lots of stuff), and plot other stuff too. Try wandb for this. Also use tmux lol.
+- higher penalty on torques
 
 
 Things I have tried
@@ -171,6 +173,7 @@ class AliengoEnv(gym.Env):
         RENDER_HEIGHT = 360
 
         base_x_velocity = np.array(p.getBaseVelocity(self.quadruped)).flatten()[0]
+        torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
 
         # RENDER_WIDTH = 960 
         # RENDER_HEIGHT = 720
@@ -201,8 +204,12 @@ class AliengoEnv(gym.Env):
                 renderer=p.ER_BULLET_HARDWARE_OPENGL)
             rgb_array = np.array(px)
             rgb_array = rgb_array[:, :, :3]
-            img = putText(np.float32(rgb_array), str(base_x_velocity)[:6], (100, 100), FONT_HERSHEY_SIMPLEX, 
-                            0.5, (0,0,0))
+            img = putText(np.float32(rgb_array), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
+                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            img = putText(np.float32(img), 'Torque Penalty Term: ' + str(torque_pen)[:8], (1, 80), 
+                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            img = putText(np.float32(img), 'Total Rew: ' + str(torque_pen + base_x_velocity)[:8], (1, 100), 
+                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             return np.uint8(img)
 
         else: 
