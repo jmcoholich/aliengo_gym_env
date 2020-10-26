@@ -220,11 +220,11 @@ class AliengoEnv(gym.Env):
         pass
 
     def _positions_to_actions(self, positions):
-        return (positions - self.action_mean) / self.action_range
+        return (positions - self.action_mean) / (self.action_range * 0.5)
   
 
     def _actions_to_positions(self, actions):
-        return actions * self.action_range + self.action_mean
+        return actions * (self.action_range * 0.5) + self.action_mean
 
 
     def _find_space_limits(self):
