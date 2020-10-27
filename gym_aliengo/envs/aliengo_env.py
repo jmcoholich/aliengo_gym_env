@@ -13,18 +13,27 @@ from cv2 import putText, FONT_HERSHEY_SIMPLEX
 
 
 Things to try
-- hyperparam sweep
-- get simulation GUI on my laptop and probe it so I know pm 1 produces desired range of motion 
 - plot entropy (I know the PPO kostrikov is logging lots of stuff), and plot other stuff too. Try wandb for this. Also use tmux lol.
 - higher penalty on torques
 
 
 Things I have tried
+- get simulation GUI on my laptop and probe it so I know pm 1 produces desired range of motion 
+- hyperparam sweep
 - normalize action space to fall within pm 1
 - changing max torque available 
 - making sure my changes to avoid jumping on startup were realized (pip install -e .)
 - printing reward function to video
 - letting train longer
+
+
+Things that might be wrong with the code
+- are the limits of the observation space used for anything? How do I know the joint vel limit is 40? (plus maybe the 
+quaternion orientation limit is bad)
+- should my position observations also be normalized? (I don't think so)
+- lets make sure its not always using max force
+- make sure I pip install -e .
+- I halfed the euler angle for the episode to terminate from robot falling
  '''
 class AliengoEnv(gym.Env):
 
@@ -40,7 +49,7 @@ class AliengoEnv(gym.Env):
         urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
         self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-            basePosition=[0,0,0.48],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=False)
+            basePosition=[0,0,0.48], baseOrientation=[0,0,0,1], flags = urdfFlags, useFixedBase=False)
 
         # fixed base for debugging 
         # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
@@ -48,23 +57,23 @@ class AliengoEnv(gym.Env):
 
         p.setGravity(0,0,-9.8)
         self.lower_legs = [2,5,8,11]
-        for l0 in self.lower_legs:
-            for l1 in self.lower_legs:
-                if (l1>l0):
-                    enableCollision = 1
-                    # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0)[12],p.getJointInfo(self.quadruped,l1)[12], "enabled=",enableCollision)
-                    p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision)
+        # for l0 in self.lower_legs:
+        #     for l1 in self.lower_legs:
+        #         if (l1>l0):
+        #             enableCollision = 1
+        #             # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0)[12],p.getJointInfo(self.quadruped,l1)[12], "enabled=",enableCollision)
+        #             p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision)
 
-        p.setRealTimeSimulation(0)
-        p.setTimeStep(1/240.)
+        p.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
+        p.setTimeStep(1/240.) # this is the default. Simulation params need to be retuned if this is changed
 
         for i in range (p.getNumJoints(self.quadruped)):
             p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5)
 
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
-        self.state_space_dim = 12 * 3 + 4 # torque, pos, and vel for each motor, plus base orientation (quaternions)
-        self.action_space_dim = 12 
+        self.state_space_dim = 12 * 3 + 4 # applied torque, pos, and vel for each motor, plus base orientation (quaternions)
+        self.action_space_dim = self.n_motors
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
         self.action_mean = np.empty(self.action_space_dim)
@@ -79,17 +88,17 @@ class AliengoEnv(gym.Env):
         self.base_orientation = np.zeros(4)
         self.base_position = np.zeros(3) # not returned as observation, but used for other calculations
         self.previous_base_twist = np.zeros(6)
-        self.previous_lower_limb_vels = np.zeros(4 * 6)
+        # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
-        self.max_torque = 40
+        self.max_torque = 40.0
         self.kp = 1.0 
         self.kd = 1.0
 
 
 
         self._find_space_limits()
-        self.num_envs = 1
+        # self.num_envs = 1
 
         self.reward = 0 # this is to store most recent reward
         self.action_space = spaces.Box(
@@ -106,12 +115,10 @@ class AliengoEnv(gym.Env):
 
 
     def step(self, action):
-        # print(self.motor_joint_indices)
-
         # action = np.clip(action, self.action_space.low, self.action_space.high)
         if not ((-1.0 <= action) & (action <= 1.0)).all():
-            print(action)
-            raise ValueError('Action is out-of-bounds') 
+            print("Action passed to env.step(): ", action)
+            raise ValueError('Action is out-of-bounds of +/- 1.0') 
 
         p.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
@@ -127,12 +134,8 @@ class AliengoEnv(gym.Env):
         self._update_state()
         self.reward = self._reward_function()
 
-        if self._is_state_terminal():
-            done = True
-        else:
-            done = False
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
-        return self.state, self.reward, done, info
+        return self.state, self.reward, self._is_state_terminal(), info
 
     
     def _apply_perturbation(self):
@@ -161,7 +164,7 @@ class AliengoEnv(gym.Env):
             forces=self.max_torque * np.ones(self.n_motors),
             positionGains=self.kp * np.ones(12),
             velocityGains=self.kd * np.ones(12))
-        for i in range(40):
+        for i in range(500):
             p.stepSimulation()
         self._update_state()
         return self.state
@@ -234,7 +237,6 @@ class AliengoEnv(gym.Env):
        # find bounds of action space 
         for i in range(self.n_motors): 
             joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i])
-            
             # bounds on joint position
             self.actions_lb[i] = joint_info[8]
             self.actions_ub[i] = joint_info[9]
@@ -264,36 +266,34 @@ class AliengoEnv(gym.Env):
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
-
         base_twist = np.array(p.getBaseVelocity(self.quadruped)).flatten()
         base_x_velocity = base_twist[0]
-        base_y_velocity = base_twist[1]
-        base_accel_penalty = np.power(base_twist[1:] - self.previous_base_twist[1:], 2).mean()
+        # base_y_velocity = base_twist[1]
+        # base_accel_penalty = np.power(base_twist[1:] - self.previous_base_twist[1:], 2).mean()
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        lower_limb_states = list(p.getLinkStates(self.quadruped, self.lower_legs, computeLinkVelocity=True))
-        lower_limb_vels = np.array([lower_limb_states[i][6] + lower_limb_states[i][7] for i in range(4)]).flatten()
-        lower_limb_accel_penalty = np.power(lower_limb_vels - self.previous_lower_limb_vels, 2).mean()
-        orientation =  np.array(list(p.getEulerFromQuaternion(self.base_orientation)))
+        # lower_limb_states = list(p.getLinkStates(self.quadruped, self.lower_legs, computeLinkVelocity=True))
+        # lower_limb_vels = np.array([lower_limb_states[i][6] + lower_limb_states[i][7] for i in range(4)]).flatten()
+        # lower_limb_accel_penalty = np.power(lower_limb_vels - self.previous_lower_limb_vels, 2).mean()
+        # orientation =  np.array(list(p.getEulerFromQuaternion(self.base_orientation)))
 
         # lower_limb_height_bonus = np.array([lower_limb_states[i][0][2] for i in range(4)]).mean()
-        orientation_pen = np.sum(np.power(orientation, 2))
-        self.previous_base_twist = base_twist 
-        self.previous_lower_limb_vels = lower_limb_vels
+        # orientation_pen = np.sum(np.power(orientation, 2))
+        # self.previous_base_twist = base_twist 
+        # self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return 1.0*base_x_velocity - 0.00001 * torque_penalty #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
+        return base_x_velocity - 0.00001 * torque_penalty #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
 
     def _update_state(self):
 
-        joint_states = list(p.getJointStates(self.quadruped, self.motor_joint_indices))
+        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices)
         self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
         self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)])
         self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
 
         base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped)
-
         self.base_position = np.array(base_position)
         self.base_orientation = np.array(base_orientation)
 
@@ -309,7 +309,7 @@ class AliengoEnv(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        falling = (abs(np.array(list(p.getEulerFromQuaternion(self.base_orientation)))) > 2 * 0.78).any() # 0.78 rad is 45 deg
+        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() # 0.78 rad is 45 deg
         return falling or height_out_of_bounds
 
 
@@ -345,7 +345,7 @@ if __name__ == '__main__':
     with open('mocap.txt','r') as f:
         for line in f:
             positions =  env._positions_to_actions(np.array(line.split(',')[2:], dtype=np.float32))
-            env.step(positions)
+            obs,_ , done, _ =  env.step(positions)
             if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
                 img = env.render('rgb_array')
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
