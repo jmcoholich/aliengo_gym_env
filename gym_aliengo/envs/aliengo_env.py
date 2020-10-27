@@ -9,7 +9,7 @@ import numpy as np
 from cv2 import putText, FONT_HERSHEY_SIMPLEX
 
 '''Agent can be trained with PPO algorithm from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail. Run:
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay --use-proper-time-limits
+ python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits
 
 
 Things to try
@@ -36,7 +36,18 @@ quaternion orientation limit is bad)
 - I halfed the euler angle for the episode to terminate from robot falling
 - Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
  if it is not touching the floor
+
+ READ THE USER MANUAL AND SEE EXACTLY WHAT'S MISSING. WHAT CAN THE ROBOT KNOW? I THINK THAT THE ROBOT NEEDS TO BE 
+ TOLD FOOT CONTACT TRUE/FALSE OR CONTACT FORCE. Unlike the GhostMinitaur, it is easily capable of dyanmic movements 
+ where it launches itself off the ground.
+ 
+ Figure out why simulation is terminating after 1 step a lot
+
+ Allocate and invest money and check amazon card. 
+
+ Assume 1e3 max foot normal force
  '''
+
 class AliengoEnv(gym.Env):
 
     def __init__(self, render=False):
@@ -58,7 +69,8 @@ class AliengoEnv(gym.Env):
         #     basePosition=[0,0,1.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True)
 
         p.setGravity(0,0,-9.8)
-        self.lower_legs = [2,5,8,11]
+        self.foot_links = [5, 9, 13, 17]
+        # self.lower_legs = [2,5,8,11]
         # for l0 in self.lower_legs:
         #     for l1 in self.lower_legs:
         #         if (l1>l0):
@@ -74,7 +86,7 @@ class AliengoEnv(gym.Env):
 
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
-        self.state_space_dim = 12 * 3 + 4 # applied torque, pos, and vel for each motor, plus base orientation (quaternions)
+        self.state_space_dim = 12 * 3 + 4 + 4 # (44) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces
         self.action_space_dim = self.n_motors
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
@@ -88,16 +100,15 @@ class AliengoEnv(gym.Env):
         self.joint_velocities = np.zeros(self.n_motors)
         self.joint_positions = np.zeros(self.n_motors)
         self.base_orientation = np.zeros(4)
+        self.foot_normal_forces = np.zeros(4)
         self.base_position = np.zeros(3) # not returned as observation, but used for other calculations
-        self.previous_base_twist = np.zeros(6)
+        self.previous_base_twist = np.zeros(6) # not returned as observation, but used for other calculations
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
         self.max_torque = 40.0
         self.kp = 1.0 
         self.kd = 1.0
-
-
 
         self._find_space_limits()
         # self.num_envs = 1
@@ -115,13 +126,28 @@ class AliengoEnv(gym.Env):
             dtype=np.float32
             )
 
+    def _get_foot_contacts(self):
+        '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
+
+        contacts = [0] * 4
+        for i in range(len(self.foot_links)):
+            info = p.getContactPoints(self.quadruped, self.plane, linkIndexA=self.foot_links[i])
+            if len(info) == 0: # leg does not contact ground
+                contacts[i] = 0 
+            elif len(info) == 1: # leg has one contact with ground
+                contacts[i] = info[0][9] # contact normal force
+            else: # use the contact point with the max normal force when there is more than one contact on a leg
+                contacts[i] = max([info[i][9] for i in range(len(info))])
+                print(min([info[i][9] for i in range(len(info))]))
+        return np.array(contacts)
+
 
     def step(self, action):
         # action = np.clip(action, self.action_space.low, self.action_space.high)
         if not ((-1.0 <= action) & (action <= 1.0)).all():
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of +/- 1.0') 
-
+            
         p.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
@@ -254,16 +280,16 @@ class AliengoEnv(gym.Env):
 
         # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation)
         self.observations_lb = np.concatenate((-self.max_torque * np.ones(12), 
-            self.actions_lb,
-             -40 * np.ones(12), 
-            -0.78 * np.ones(4)))
+                                                self.actions_lb,
+                                                -40 * np.ones(12), 
+                                                -0.78 * np.ones(4),
+                                                np.zeros(4)))
 
         self.observations_ub = np.concatenate((self.max_torque * np.ones(12), 
-            self.actions_ub, 
-            40 * np.ones(12), 
-            0.78 * np.ones(4)))
-        
-
+                                                self.actions_ub, 
+                                                40 * np.ones(12), 
+                                                0.78 * np.ones(4),
+                                                1e3 * np.ones(4)))
 
 
     def _reward_function(self) -> float:
@@ -299,8 +325,13 @@ class AliengoEnv(gym.Env):
         self.base_position = np.array(base_position)
         self.base_orientation = np.array(base_orientation)
 
-        self.state = np.concatenate((self.applied_torques, self.joint_positions, self.joint_velocities, self.base_orientation))
+        self.foot_normal_forces = self._get_foot_contacts()
 
+        self.state = np.concatenate((self.applied_torques, 
+                                    self.joint_positions,
+                                    self.joint_velocities,
+                                    self.base_orientation,
+                                    self.foot_normal_forces))
         if np.isnan(self.state).any():
             print('nans in state')
             breakpoint()
