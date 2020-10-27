@@ -25,15 +25,17 @@ Things I have tried
 - making sure my changes to avoid jumping on startup were realized (pip install -e .)
 - printing reward function to video
 - letting train longer
+- made sure its not always using max force
 
 
 Things that might be wrong with the code
 - are the limits of the observation space used for anything? How do I know the joint vel limit is 40? (plus maybe the 
 quaternion orientation limit is bad)
 - should my position observations also be normalized? (I don't think so)
-- lets make sure its not always using max force
 - make sure I pip install -e .
 - I halfed the euler angle for the episode to terminate from robot falling
+- Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
+ if it is not touching the floor
  '''
 class AliengoEnv(gym.Env):
 
