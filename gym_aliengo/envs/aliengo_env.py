@@ -110,6 +110,7 @@ class AliengoEnv(gym.Env):
 
         # action = np.clip(action, self.action_space.low, self.action_space.high)
         if not ((-1.0 <= action) & (action <= 1.0)).all():
+            print(action)
             raise ValueError('Action is out-of-bounds') 
 
         p.setJointMotorControlArray(self.quadruped,
