@@ -62,6 +62,12 @@ Make sure my plots are correct in save_video. I think the joints are just oversh
 Also, do a run for much longer. Also visualize the sucessful runs so far. 
 
 terminate if any body part other than feet touches the ground
+
+PUt together some slides
+
+Kill if all four feet leave the ground. 
+
+have a framework to automatically save videos.
  '''
 class AliengoEnv(gym.Env):
 
