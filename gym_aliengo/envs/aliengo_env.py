@@ -14,7 +14,8 @@ from cv2 import putText, FONT_HERSHEY_SIMPLEX
 
 default params with 10x samples:
  python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test4 --seed 4
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 6000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test8 --seed 8
+
+ python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 6000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test9 --seed 9
 
 
 Things to try
@@ -31,6 +32,7 @@ Things I have tried
 - printing reward function to video
 - letting train longer
 - made sure its not always using max force
+- fixed issue where I didn't specify the PhysicsclientID
 
 
 Things that might be wrong with the code
@@ -41,27 +43,14 @@ quaternion orientation limit is bad)
 - I halfed the euler angle for the episode to terminate from robot falling
 - Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
  if it is not touching the floor
-
- READ THE USER MANUAL AND SEE EXACTLY WHAT'S MISSING. WHAT CAN THE ROBOT KNOW? I THINK THAT THE ROBOT NEEDS TO BE 
- TOLD FOOT CONTACT TRUE/FALSE OR CONTACT FORCE. Unlike the GhostMinitaur, it is easily capable of dyanmic movements 
- where it launches itself off the ground.
  
- Figure out why simulation is terminating after 1 step a lot
-
  Allocate and invest money and check amazon card. Make sure payment I made to bursar was correct. 
 
  Perhaps I should take the norm or sum of the foot contact forces. Do some investigation.
 
- Add proper logging with number of steps gathered
 
- I have a lot of length 1 episodes for some reason. CHECK this
-
-
-SOMETHING IS WRONG WITH MY TERMINATION CONDITION WHEN I RUN MULTIPLE INSTANCE OF THE ENV. I should look into this 
-because it may be affecting more than the termination condition.
-
-
-JOINTS ARE GOING OUT OF BOUNDS AGAIN
+JOINTS ARE GOING OUT OF BOUNDS AGAIN and its still not quite good. Why doen't it learn to just keep its feet under it? 
+Perhaps add a reward just for existing.
  '''
 class AliengoEnv(gym.Env):
 
@@ -73,6 +62,9 @@ class AliengoEnv(gym.Env):
             self.client = p.connect(p.GUI)
         else:
             self.client = p.connect(p.DIRECT)
+
+        if self.client == -1:
+            raise RuntimeError('Pybullet could not connect to physics client')
 
         urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
@@ -169,7 +161,24 @@ class AliengoEnv(gym.Env):
         contacts = np.array(contacts)
         if (contacts > 10_000).any():
             warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
-        return contacts
+
+        # begin code for debugging foot contacts
+        debug = [0] * 4
+        for i in range(len(self.foot_links)):
+            info = p.getContactPoints(self.quadruped, 
+                                        self.plane, 
+                                        linkIndexA=self.foot_links[i],
+                                        physicsClientId=self.client)
+            if len(info) == 0: # leg does not contact ground
+                debug[i] = 0 
+            elif len(info) == 1: # leg has one contact with ground
+                debug[i] = info[0][9] # contact normal force
+            else: # use the contact point with the max normal force when there is more than one contact on a leg
+                normals = [info[i][9] for i in range(len(info))]
+                debug[i] = normals
+                # print('\nmultiple contacts' + '*' * 100 + '\n')
+        debug = np.array(debug)
+        return contacts, debug
 
 
     def step(self, action):
@@ -272,7 +281,6 @@ class AliengoEnv(gym.Env):
                 nearVal=0.1,
                 farVal=100.0,
                 physicsClientId=self.client)
-
             _, _, px, _, _ = p.getCameraImage(width=RENDER_WIDTH,
                 height=RENDER_HEIGHT,
                 viewMatrix=view_matrix,
@@ -286,6 +294,12 @@ class AliengoEnv(gym.Env):
             img = putText(np.float32(img), 'Torque Penalty Term: ' + str(torque_pen)[:8], (1, 80), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             img = putText(np.float32(img), 'Total Rew: ' + str(torque_pen + base_x_velocity)[:8], (1, 100), 
+                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            _, foot_contacts = self._get_foot_contacts()
+            for i in range(4):
+                img = putText(np.float32(img), 
+                            ('Foot %d contacts: ' %(i+1)) + str(foot_contacts[i].round(2)), 
+                            (200, 60 + 20 * i), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             return np.uint8(img)
 
@@ -354,7 +368,8 @@ class AliengoEnv(gym.Env):
         # self.previous_base_twist = base_twist 
         # self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        return base_x_velocity - 0.00001 * torque_penalty #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
+        existence_reward = 1.0
+        return base_x_velocity - 0.00001 * torque_penalty + existence_reward #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
@@ -370,7 +385,7 @@ class AliengoEnv(gym.Env):
         self.base_position = np.array(base_position)
         self.base_orientation = np.array(base_orientation)
 
-        self.foot_normal_forces = self._get_foot_contacts()
+        self.foot_normal_forces, _ = self._get_foot_contacts()
 
         self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
