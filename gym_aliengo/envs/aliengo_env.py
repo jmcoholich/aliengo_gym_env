@@ -6,10 +6,15 @@ import pybullet as p
 import os
 import time
 import numpy as np
+import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX
 
 '''Agent can be trained with PPO algorithm from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail. Run:
  python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits
+
+default params with 10x samples:
+ python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test4 --seed 4
+ python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 6000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test8 --seed 8
 
 
 Things to try
@@ -43,11 +48,21 @@ quaternion orientation limit is bad)
  
  Figure out why simulation is terminating after 1 step a lot
 
- Allocate and invest money and check amazon card. 
+ Allocate and invest money and check amazon card. Make sure payment I made to bursar was correct. 
 
- Assume 1e3 max foot normal force
+ Perhaps I should take the norm or sum of the foot contact forces. Do some investigation.
+
+ Add proper logging with number of steps gathered
+
+ I have a lot of length 1 episodes for some reason. CHECK this
+
+
+SOMETHING IS WRONG WITH MY TERMINATION CONDITION WHEN I RUN MULTIPLE INSTANCE OF THE ENV. I should look into this 
+because it may be affecting more than the termination condition.
+
+
+JOINTS ARE GOING OUT OF BOUNDS AGAIN
  '''
-
 class AliengoEnv(gym.Env):
 
     def __init__(self, render=False):
@@ -55,34 +70,41 @@ class AliengoEnv(gym.Env):
         self._is_render = render
 
         if self._is_render:
-            p.connect(p.GUI)
+            self.client = p.connect(p.GUI)
         else:
-            p.connect(p.DIRECT)
+            self.client = p.connect(p.DIRECT)
 
         urdfFlags = p.URDF_USE_SELF_COLLISION
-        self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
+        self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
+                                physicsClientId=self.client)
         self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-            basePosition=[0,0,0.48], baseOrientation=[0,0,0,1], flags = urdfFlags, useFixedBase=False)
+                                    basePosition=[0,0,0.48], 
+                                    baseOrientation=[0,0,0,1], 
+                                    flags = urdfFlags, 
+                                    useFixedBase=False,
+                                    physicsClientId=self.client)
 
         # fixed base for debugging 
         # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-        #     basePosition=[0,0,1.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True)
+        #     basePosition=[0,0,1.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True, 
+        #       physicsClientId=self.client)
 
-        p.setGravity(0,0,-9.8)
+        p.setGravity(0,0,-9.8, physicsClientId=self.client)
         self.foot_links = [5, 9, 13, 17]
         # self.lower_legs = [2,5,8,11]
         # for l0 in self.lower_legs:
         #     for l1 in self.lower_legs:
         #         if (l1>l0):
         #             enableCollision = 1
-        #             # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0)[12],p.getJointInfo(self.quadruped,l1)[12], "enabled=",enableCollision)
-        #             p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision)
+        #             # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0, physicsClientId=self.client)[12],p.getJointInfo(self.quadruped,l1, physicsClientId=self.client)[12], "enabled=",enableCollision)
+        #             p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision, physicsClientId=self.client)
 
-        p.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
-        p.setTimeStep(1/240.) # this is the default. Simulation params need to be retuned if this is changed
+        p.setRealTimeSimulation(0, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
+        # below is the default. Simulation params need to be retuned if this is changed
+        p.setTimeStep(1/240., physicsClientId=self.client)
 
-        for i in range (p.getNumJoints(self.quadruped)):
-            p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5)
+        for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
+            p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5, physicsClientId=self.client)
 
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
@@ -131,15 +153,23 @@ class AliengoEnv(gym.Env):
 
         contacts = [0] * 4
         for i in range(len(self.foot_links)):
-            info = p.getContactPoints(self.quadruped, self.plane, linkIndexA=self.foot_links[i])
+            info = p.getContactPoints(self.quadruped, 
+                                        self.plane, 
+                                        linkIndexA=self.foot_links[i],
+                                        physicsClientId=self.client)
             if len(info) == 0: # leg does not contact ground
                 contacts[i] = 0 
             elif len(info) == 1: # leg has one contact with ground
                 contacts[i] = info[0][9] # contact normal force
             else: # use the contact point with the max normal force when there is more than one contact on a leg
-                contacts[i] = max([info[i][9] for i in range(len(info))])
-                print(min([info[i][9] for i in range(len(info))]))
-        return np.array(contacts)
+                normals = [info[i][9] for i in range(len(info))]
+                contacts[i] = max(normals)
+                print('Number of contacts on one foot: %d' %len(info))
+                print('Normal Forces: ', normals,'\n')
+        contacts = np.array(contacts)
+        if (contacts > 10_000).any():
+            warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
+        return contacts
 
 
     def step(self, action):
@@ -154,25 +184,29 @@ class AliengoEnv(gym.Env):
             targetPositions=self._actions_to_positions(action),
             forces=self.max_torque * np.ones(self.n_motors),
             positionGains=self.kp * np.ones(12),
-            velocityGains=self.kd * np.ones(12))
+            velocityGains=self.kd * np.ones(12),
+            physicsClientId=self.client)
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
             self._apply_perturbation()
-        p.stepSimulation()
+        p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         self.reward = self._reward_function()
 
+        done, reason = self._is_state_terminal()
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
-        return self.state, self.reward, self._is_state_terminal(), info
+        if done:
+            info['termination_reason'] = reason
+        return self.state, self.reward, done, info
 
     
     def _apply_perturbation(self):
         if np.random.rand() > 0.5: # apply force
             force = tuple(10 * (np.random.rand(3) - 0.5))
-            p.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
+            p.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME, physicsClientId=self.client)
         else: # apply torque
             torque = tuple(0.5 * (np.random.rand(3) - 0.5))
-            p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
+            p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME, physicsClientId=self.client)
 
 
     def reset(self):
@@ -182,18 +216,26 @@ class AliengoEnv(gym.Env):
 
         starting_pos = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
           -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
-        p.resetBasePositionAndOrientation(self.quadruped, posObj=[0,0,0.48], ornObj=[0,0,0,1.0]) 
+        p.resetBasePositionAndOrientation(self.quadruped,
+                                            posObj=[0,0,0.48],
+                                            ornObj=[0,0,0,1.0],
+                                            physicsClientId=self.client) 
         for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
-            p.resetJointState(self.quadruped, self.motor_joint_indices[i], starting_pos[i], targetVelocity=0)
+                        p.resetJointState(self.quadruped, 
+                        self.motor_joint_indices[i],
+                        starting_pos[i],
+                        targetVelocity=0,
+                        physicsClientId=self.client)
         p.setJointMotorControlArray(self.quadruped,
-            self.motor_joint_indices,
-            controlMode=p.POSITION_CONTROL,
-            targetPositions=starting_pos,
-            forces=self.max_torque * np.ones(self.n_motors),
-            positionGains=self.kp * np.ones(12),
-            velocityGains=self.kd * np.ones(12))
+                                    self.motor_joint_indices,
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=starting_pos,
+                                    forces=self.max_torque * np.ones(self.n_motors),
+                                    positionGains=self.kp * np.ones(12),
+                                    velocityGains=self.kd * np.ones(12),
+                                    physicsClientId=self.client)
         for i in range(500):
-            p.stepSimulation()
+            p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         return self.state
 
@@ -204,7 +246,7 @@ class AliengoEnv(gym.Env):
         RENDER_WIDTH = 480 
         RENDER_HEIGHT = 360
 
-        base_x_velocity = np.array(p.getBaseVelocity(self.quadruped)).flatten()[0]
+        base_x_velocity = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()[0]
         torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
 
         # RENDER_WIDTH = 960 
@@ -214,7 +256,7 @@ class AliengoEnv(gym.Env):
         # RENDER_HEIGHT = 1080
 
         if mode == 'rgb_array':
-            base_pos, _ = p.getBasePositionAndOrientation(self.quadruped)
+            base_pos, _ = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
             # base_pos = self.minitaur.GetBasePosition()
             view_matrix = p.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=base_pos,
@@ -222,18 +264,21 @@ class AliengoEnv(gym.Env):
                 yaw=0,
                 pitch=-30.,
                 roll=0,
-                upAxisIndex=2)
+                upAxisIndex=2,
+                physicsClientId=self.client)
             proj_matrix = p.computeProjectionMatrixFOV(fov=60,
                 aspect=float(RENDER_WIDTH) /
                 RENDER_HEIGHT,
                 nearVal=0.1,
-                farVal=100.0)
+                farVal=100.0,
+                physicsClientId=self.client)
 
             _, _, px, _, _ = p.getCameraImage(width=RENDER_WIDTH,
                 height=RENDER_HEIGHT,
                 viewMatrix=view_matrix,
                 projectionMatrix=proj_matrix,
-                renderer=p.ER_BULLET_HARDWARE_OPENGL)
+                renderer=p.ER_BULLET_HARDWARE_OPENGL,
+                physicsClientId=self.client)
             rgb_array = np.array(px)
             rgb_array = rgb_array[:, :, :3]
             img = putText(np.float32(rgb_array), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
@@ -264,7 +309,7 @@ class AliengoEnv(gym.Env):
 
        # find bounds of action space 
         for i in range(self.n_motors): 
-            joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i])
+            joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i], physicsClientId=self.client)
             # bounds on joint position
             self.actions_lb[i] = joint_info[8]
             self.actions_ub[i] = joint_info[9]
@@ -289,12 +334,12 @@ class AliengoEnv(gym.Env):
                                                 self.actions_ub, 
                                                 40 * np.ones(12), 
                                                 0.78 * np.ones(4),
-                                                1e3 * np.ones(4)))
+                                                1e4 * np.ones(4)))
 
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
-        base_twist = np.array(p.getBaseVelocity(self.quadruped)).flatten()
+        base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
         base_x_velocity = base_twist[0]
         # base_y_velocity = base_twist[1]
         # base_accel_penalty = np.power(base_twist[1:] - self.previous_base_twist[1:], 2).mean()
@@ -316,12 +361,12 @@ class AliengoEnv(gym.Env):
 
     def _update_state(self):
 
-        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices)
+        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices, physicsClientId=self.client)
         self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
         self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)])
         self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
 
-        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped)
+        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
         self.base_position = np.array(base_position)
         self.base_orientation = np.array(base_orientation)
 
@@ -338,12 +383,23 @@ class AliengoEnv(gym.Env):
 
 
     def _is_state_terminal(self) -> bool:
-        ''' Calculates whether to end current episode due to failure based on current state. Does not consider timeout '''
+        ''' Calculates whether to end current episode due to failure based on current state. Does not consider timeout.
+        Returns boolean and reason if True '''
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() # 0.78 rad is 45 deg
-        return falling or height_out_of_bounds
+        # 0.78 rad is about 45 deg
+        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
+        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
+        if falling:
+            reason = 'falling'
+            # print(reason)
+            # print(p.getEulerFromQuaternion(self.base_orientation))
+        elif height_out_of_bounds:
+            reason = 'height_out_of_bounds'
+        else:
+            reason = ''
+        return (falling or height_out_of_bounds), reason
 
 
 if __name__ == '__main__':
@@ -359,7 +415,7 @@ if __name__ == '__main__':
     counter = 0
 
     # for i in range(200):
-    #     p.stepSimulation()
+    #     p.stepSimulation(physicsClientId=env.client)
     #     img = env.render('rgb_array')
     #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     #     img_list.append(img)
@@ -370,7 +426,7 @@ if __name__ == '__main__':
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     # img_list.append(img)
     # for i in range(200):
-    #     p.stepSimulation()
+    #     p.stepSimulation(physicsClientId=env.client)
     #     img = env.render('rgb_array')
     #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     #     img_list.append(img)
