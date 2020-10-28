@@ -33,6 +33,7 @@ Things I have tried
 - letting train longer
 - made sure its not always using max force
 - fixed issue where I didn't specify the PhysicsclientID
+- Add a reward just for existing.
 
 
 Things that might be wrong with the code
@@ -50,7 +51,17 @@ quaternion orientation limit is bad)
 
 
 JOINTS ARE GOING OUT OF BOUNDS AGAIN and its still not quite good. Why doen't it learn to just keep its feet under it? 
-Perhaps add a reward just for existing.
+
+Augment the state space with accelerometer info?  Read papers
+
+Try a recurent policy
+
+Try bootstrapping with sine wave
+
+Make sure my plots are correct in save_video. I think the joints are just overshooting though. BUT CHECK JUST IN CASE.
+Also, do a run for much longer. Also visualize the sucessful runs so far. 
+
+terminate if any body part other than feet touches the ground
  '''
 class AliengoEnv(gym.Env):
 
@@ -98,6 +109,7 @@ class AliengoEnv(gym.Env):
         for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
             p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5, physicsClientId=self.client)
 
+        # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
         self.state_space_dim = 12 * 3 + 4 + 4 # (44) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces
@@ -177,7 +189,7 @@ class AliengoEnv(gym.Env):
                 normals = [info[i][9] for i in range(len(info))]
                 debug[i] = normals
                 # print('\nmultiple contacts' + '*' * 100 + '\n')
-        debug = np.array(debug)
+        debug = debug
         return contacts, debug
 
 
@@ -297,8 +309,12 @@ class AliengoEnv(gym.Env):
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             _, foot_contacts = self._get_foot_contacts()
             for i in range(4):
+                if type(foot_contacts[i]) is list: # multiple contacts
+                    num = np.array(foot_contacts[i]).round(2)
+                else:
+                    num = round(foot_contacts[i], 2)
                 img = putText(np.float32(img), 
-                            ('Foot %d contacts: ' %(i+1)) + str(foot_contacts[i].round(2)), 
+                            ('Foot %d contacts: ' %(i+1)) + str(num), 
                             (200, 60 + 20 * i), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             return np.uint8(img)
