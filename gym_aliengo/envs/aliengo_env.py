@@ -38,6 +38,7 @@ Things I have tried
 - terminate if x-vel is significantly negative
 - terminate if the robot collides with itself.
 - terminate if all four feet leave the ground. 
+- add angular velocity and cartesian acceleration to observation
 
 
 Things that might be wrong with the code
@@ -55,8 +56,7 @@ quaternion orientation limit is bad)
 
 JOINTS ARE GOING OUT OF BOUNDS AGAIN and its still not quite good. Why doen't it learn to just keep its feet under it? 
 
-Augment the state space with accelerometer info?  Read papers
-- add angular velocity and cartesian acceleration
+Read papers
 
 Try a recurent policy
 
@@ -68,6 +68,8 @@ Also, do a run for much longer. Also visualize the sucessful runs so far.
 PUt together some slides
 
 have a framework to automatically save videos to wandb.
+
+Give a reward of -10 for termination, instead of giving a +1 for not terminating.
  '''
 class AliengoEnv(gym.Env):
 
@@ -243,9 +245,9 @@ class AliengoEnv(gym.Env):
             self._apply_perturbation()
         p.stepSimulation(physicsClientId=self.client)
         self._update_state()
-        self.reward = self._reward_function()
-
         done, reason = self._is_state_terminal()
+        self.reward = self._reward_function(done, reason)
+
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
         if done:
             info['termination_reason'] = reason
@@ -398,20 +400,20 @@ class AliengoEnv(gym.Env):
                                                 self.actions_lb,
                                                 -40 * np.ones(12), 
                                                 -0.78 * np.ones(4),
-                                                np.zeros(4)),
+                                                np.zeros(4),
                                                 -100 * np.ones(3),
-                                                -100 * np.ones(3))
+                                                -100 * np.ones(3)))
 
         self.observations_ub = np.concatenate((self.max_torque * np.ones(12), 
                                                 self.actions_ub, 
                                                 40 * np.ones(12), 
                                                 0.78 * np.ones(4),
-                                                1e4 * np.ones(4)),
+                                                1e4 * np.ones(4),
                                                 100 * np.ones(3),
-                                                100 * np.ones(3))
+                                                100 * np.ones(3)))
 
 
-    def _reward_function(self) -> float:
+    def _reward_function(self, done, reason) -> float:
         ''' Calculates reward based off of current state '''
 
         base_x_velocity = self.base_twist[0]
@@ -428,8 +430,10 @@ class AliengoEnv(gym.Env):
         # self.previous_base_twist = base_twist 
         # self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        existence_reward = 1.0 * 0
-        return base_x_velocity - 0.00001 * torque_penalty + existence_reward #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
+        existence_reward = 0.0
+        termination_penalty = 10.0
+        return base_x_velocity - 0.00001 * torque_penalty + existence_reward - termination_penalty * done
+            #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
