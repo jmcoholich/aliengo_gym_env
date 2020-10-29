@@ -36,6 +36,7 @@ Things I have tried
 - Add a reward just for existing.
 - terminate if any body part other than feet touches the ground
 - terminate if x-vel is significantly negative
+- terminate if the robot collides with itself.
 
 
 Things that might be wrong with the code
@@ -70,7 +71,6 @@ have a framework to automatically save videos to wandb.
 Save videos from run from last night.
 
 
-terminate if the robot collides with itself.
 
  '''
 class AliengoEnv(gym.Env):
@@ -473,6 +473,7 @@ class AliengoEnv(gym.Env):
 
         self_collision = self._is_robot_self_collision()
 
+        no_feet_on_ground = (self.foot_normal_forces == 0).all()
         if falling:
             reason = 'falling'
             # print(reason)
@@ -485,9 +486,12 @@ class AliengoEnv(gym.Env):
             reason = 'going_backwards'
         elif self_collision:
             reason = 'self_collision'
+        elif no_feet_on_ground:
+            reason = 'no_feet_on_ground'
         else:
             reason = ''
-        return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision]), reason
+        return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision, no_feet_on_ground]), \
+            reason
 
 
 if __name__ == '__main__':
