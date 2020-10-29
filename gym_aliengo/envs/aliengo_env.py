@@ -167,6 +167,7 @@ class AliengoEnv(gym.Env):
 
     def _is_non_foot_ground_contact(self):
         """Detect if any parts of the robot, other than the feet, are touching the ground."""
+
         contact = False
         for i in range(self.num_joints):
             if i in self.foot_links: # the feet themselves are allow the touch the ground
@@ -178,7 +179,9 @@ class AliengoEnv(gym.Env):
 
     def _is_robot_self_collision(self):
         '''Returns true if any of the robot links are colliding with any other link'''
-        pass    
+
+        points = p.getContactPoints(self.quadruped, self.quadruped, physicsClientId=self.client)
+        return len(points) > 0
 
 
     def _get_foot_contacts(self):
@@ -350,6 +353,10 @@ class AliengoEnv(gym.Env):
                             'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
                             (200, 60 + 20 * 4), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            img = putText(np.float32(img), 
+                            'Self Collision: ' + str(self._is_robot_self_collision()), 
+                            (200, 60 + 20 * 5), 
+                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             return np.uint8(img)
 
         else: 
@@ -463,6 +470,9 @@ class AliengoEnv(gym.Env):
         falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
 
         going_backwards = self.base_twist[0] <= -0.5
+
+        self_collision = self._is_robot_self_collision()
+
         if falling:
             reason = 'falling'
             # print(reason)
@@ -473,9 +483,11 @@ class AliengoEnv(gym.Env):
             reason = 'body_contact_with_ground'
         elif going_backwards:
             reason = 'going_backwards'
+        elif self_collision:
+            reason = 'self_collision'
         else:
             reason = ''
-        return any([falling, height_out_of_bounds, body_contact, going_backwards]), reason
+        return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision]), reason
 
 
 if __name__ == '__main__':
