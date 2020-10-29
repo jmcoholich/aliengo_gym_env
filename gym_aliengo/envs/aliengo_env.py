@@ -34,6 +34,7 @@ Things I have tried
 - made sure its not always using max force
 - fixed issue where I didn't specify the PhysicsclientID
 - Add a reward just for existing.
+- terminate if any body part other than feet touches the ground
 
 
 Things that might be wrong with the code
@@ -59,13 +60,13 @@ Try bootstrapping with sine wave
 Make sure my plots are correct in save_video. I think the joints are just overshooting though. BUT CHECK JUST IN CASE.
 Also, do a run for much longer. Also visualize the sucessful runs so far. 
 
-terminate if any body part other than feet touches the ground
-
 PUt together some slides
 
 Kill if all four feet leave the ground. 
 
 have a framework to automatically save videos.
+
+terminate if x-vel is significantly negative
  '''
 class AliengoEnv(gym.Env):
 
@@ -168,6 +169,7 @@ class AliengoEnv(gym.Env):
             if len(points) != 0:
                 contact = True
         return contact
+
 
     def _get_foot_contacts(self):
         '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
