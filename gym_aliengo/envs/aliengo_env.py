@@ -68,8 +68,8 @@ Also, do a run for much longer. Also visualize the sucessful runs so far.
 PUt together some slides
 
 have a framework to automatically save videos to wandb.
-
-Give a reward of -10 for termination, instead of giving a +1 for not terminating.
+plot entropy
+Give a reward of -10 for termination, instead of giving a +1 for not terminating. Run this on my home machine.
  '''
 class AliengoEnv(gym.Env):
 
