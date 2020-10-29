@@ -45,8 +45,6 @@ quaternion orientation limit is bad)
 - Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
  if it is not touching the floor
  
- Allocate and invest money and check amazon card. Make sure payment I made to bursar was correct. 
-
  Perhaps I should take the norm or sum of the foot contact forces. Do some investigation.
 
 
@@ -119,6 +117,7 @@ class AliengoEnv(gym.Env):
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
         self.state_space_dim = 12 * 3 + 4 + 4 # (44) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces
+        self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.n_motors
         self.actions_ub = np.empty(self.action_space_dim)
         self.actions_lb = np.empty(self.action_space_dim)
@@ -157,6 +156,18 @@ class AliengoEnv(gym.Env):
             high=self.observations_ub,
             dtype=np.float32
             )
+
+
+    def _is_non_foot_ground_contact(self):
+        """Detect if any parts of the robot, other than the feet, are touching the ground."""
+        contact = False
+        for i in range(self.num_joints):
+            if i in self.foot_links: # the feet themselves are allow the touch the ground
+                continue
+            points = p.getContactPoints(self.quadruped, self.plane, linkIndexA=i, physicsClientId=self.client)
+            if len(points) != 0:
+                contact = True
+        return contact
 
     def _get_foot_contacts(self):
         '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
@@ -323,6 +334,10 @@ class AliengoEnv(gym.Env):
                             ('Foot %d contacts: ' %(i+1)) + str(num), 
                             (200, 60 + 20 * i), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            img = putText(np.float32(img), 
+                            'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
+                            (200, 60 + 20 * 4), 
+                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             return np.uint8(img)
 
         else: 
@@ -425,6 +440,7 @@ class AliengoEnv(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
+        body_contact = self._is_non_foot_ground_contact()
         # 0.78 rad is about 45 deg
         # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
         falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
@@ -434,9 +450,11 @@ class AliengoEnv(gym.Env):
             # print(p.getEulerFromQuaternion(self.base_orientation))
         elif height_out_of_bounds:
             reason = 'height_out_of_bounds'
+        elif body_contact:
+            reason = 'body_contact_with_ground'
         else:
             reason = ''
-        return (falling or height_out_of_bounds), reason
+        return (falling or height_out_of_bounds or body_contact), reason
 
 
 if __name__ == '__main__':
