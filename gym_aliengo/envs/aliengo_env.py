@@ -15,7 +15,7 @@ from cv2 import putText, FONT_HERSHEY_SIMPLEX
 default params with 10x samples:
  python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test4 --seed 4
 
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 6000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test9 --seed 9
+ python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/new4 --seed 4
 
 
 Things to try
@@ -35,6 +35,7 @@ Things I have tried
 - fixed issue where I didn't specify the PhysicsclientID
 - Add a reward just for existing.
 - terminate if any body part other than feet touches the ground
+- terminate if x-vel is significantly negative
 
 
 Things that might be wrong with the code
@@ -64,9 +65,13 @@ PUt together some slides
 
 Kill if all four feet leave the ground. 
 
-have a framework to automatically save videos.
+have a framework to automatically save videos to wandb.
 
-terminate if x-vel is significantly negative
+Save videos from run from last night.
+
+
+terminate if the robot collides with itself.
+
  '''
 class AliengoEnv(gym.Env):
 
@@ -133,8 +138,9 @@ class AliengoEnv(gym.Env):
         self.joint_positions = np.zeros(self.n_motors)
         self.base_orientation = np.zeros(4)
         self.foot_normal_forces = np.zeros(4)
-        self.base_position = np.zeros(3) # not returned as observation, but used for other calculations
-        self.previous_base_twist = np.zeros(6) # not returned as observation, but used for other calculations
+        self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
+        self.base_twist = np.zeros(6) # not returned as observation, but used for calculating reward or termination
+        # self.previous_base_twist = np.zeros(6) # not returned as observation, but used for other calculations
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
@@ -169,6 +175,10 @@ class AliengoEnv(gym.Env):
             if len(points) != 0:
                 contact = True
         return contact
+
+    def _is_robot_self_collision(self):
+        '''Returns true if any of the robot links are colliding with any other link'''
+        pass    
 
 
     def _get_foot_contacts(self):
@@ -392,8 +402,8 @@ class AliengoEnv(gym.Env):
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
-        base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
-        base_x_velocity = base_twist[0]
+
+        base_x_velocity = self.base_twist[0]
         # base_y_velocity = base_twist[1]
         # base_accel_penalty = np.power(base_twist[1:] - self.previous_base_twist[1:], 2).mean()
         torque_penalty = np.power(self.applied_torques, 2).mean()
@@ -407,7 +417,7 @@ class AliengoEnv(gym.Env):
         # self.previous_base_twist = base_twist 
         # self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-        existence_reward = 1.0
+        existence_reward = 1.0 * 0
         return base_x_velocity - 0.00001 * torque_penalty + existence_reward #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
@@ -421,8 +431,8 @@ class AliengoEnv(gym.Env):
         self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
 
         base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
-        self.base_position = np.array(base_position)
         self.base_orientation = np.array(base_orientation)
+
 
         self.foot_normal_forces, _ = self._get_foot_contacts()
 
@@ -434,6 +444,9 @@ class AliengoEnv(gym.Env):
         if np.isnan(self.state).any():
             print('nans in state')
             breakpoint()
+        # Not used in state, but used in _is_terminal() and _reward()    
+        self.base_position = np.array(base_position)
+        self.base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
 
 
     def _is_state_terminal(self) -> bool:
@@ -442,10 +455,14 @@ class AliengoEnv(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
+
         body_contact = self._is_non_foot_ground_contact()
+
         # 0.78 rad is about 45 deg
         # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
         falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
+
+        going_backwards = self.base_twist[0] <= -0.5
         if falling:
             reason = 'falling'
             # print(reason)
@@ -454,9 +471,11 @@ class AliengoEnv(gym.Env):
             reason = 'height_out_of_bounds'
         elif body_contact:
             reason = 'body_contact_with_ground'
+        elif going_backwards:
+            reason = 'going_backwards'
         else:
             reason = ''
-        return (falling or height_out_of_bounds or body_contact), reason
+        return any([falling, height_out_of_bounds, body_contact, going_backwards]), reason
 
 
 if __name__ == '__main__':
