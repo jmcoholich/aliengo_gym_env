@@ -37,6 +37,7 @@ Things I have tried
 - terminate if any body part other than feet touches the ground
 - terminate if x-vel is significantly negative
 - terminate if the robot collides with itself.
+- terminate if all four feet leave the ground. 
 
 
 Things that might be wrong with the code
@@ -47,6 +48,7 @@ quaternion orientation limit is bad)
 - I halfed the euler angle for the episode to terminate from robot falling
 - Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
  if it is not touching the floor
+ - I'm guessing on obs space limits on the last 6 items
  
  Perhaps I should take the norm or sum of the foot contact forces. Do some investigation.
 
@@ -54,6 +56,7 @@ quaternion orientation limit is bad)
 JOINTS ARE GOING OUT OF BOUNDS AGAIN and its still not quite good. Why doen't it learn to just keep its feet under it? 
 
 Augment the state space with accelerometer info?  Read papers
+- add angular velocity and cartesian acceleration
 
 Try a recurent policy
 
@@ -64,14 +67,7 @@ Also, do a run for much longer. Also visualize the sucessful runs so far.
 
 PUt together some slides
 
-Kill if all four feet leave the ground. 
-
 have a framework to automatically save videos to wandb.
-
-Save videos from run from last night.
-
-
-
  '''
 class AliengoEnv(gym.Env):
 
@@ -122,7 +118,9 @@ class AliengoEnv(gym.Env):
         # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
         self.n_motors = 12
-        self.state_space_dim = 12 * 3 + 4 + 4 # (44) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces
+        # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
+        # cartesian base acceleration, base angular velocity
+        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.n_motors
         self.actions_ub = np.empty(self.action_space_dim)
@@ -138,9 +136,10 @@ class AliengoEnv(gym.Env):
         self.joint_positions = np.zeros(self.n_motors)
         self.base_orientation = np.zeros(4)
         self.foot_normal_forces = np.zeros(4)
+        self.cartesian_base_accel = np.zeros(3) 
+        self.base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
+        self.previous_base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
-        self.base_twist = np.zeros(6) # not returned as observation, but used for calculating reward or termination
-        # self.previous_base_twist = np.zeros(6) # not returned as observation, but used for other calculations
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
@@ -393,18 +392,23 @@ class AliengoEnv(gym.Env):
         self.action_mean = (self.actions_ub + self.actions_lb)/2 
         self.action_range = self.actions_ub - self.actions_lb
 
-        # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation)
+        # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation, cartesian
+        # base accel, base angular velocity)
         self.observations_lb = np.concatenate((-self.max_torque * np.ones(12), 
                                                 self.actions_lb,
                                                 -40 * np.ones(12), 
                                                 -0.78 * np.ones(4),
-                                                np.zeros(4)))
+                                                np.zeros(4)),
+                                                -100 * np.ones(3),
+                                                -100 * np.ones(3))
 
         self.observations_ub = np.concatenate((self.max_torque * np.ones(12), 
                                                 self.actions_ub, 
                                                 40 * np.ones(12), 
                                                 0.78 * np.ones(4),
-                                                1e4 * np.ones(4)))
+                                                1e4 * np.ones(4)),
+                                                100 * np.ones(3),
+                                                100 * np.ones(3))
 
 
     def _reward_function(self) -> float:
@@ -438,6 +442,8 @@ class AliengoEnv(gym.Env):
         self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
 
         base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
+        self.base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
+        self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
         self.base_orientation = np.array(base_orientation)
 
 
@@ -447,13 +453,15 @@ class AliengoEnv(gym.Env):
                                     self.joint_positions,
                                     self.joint_velocities,
                                     self.base_orientation,
-                                    self.foot_normal_forces))
+                                    self.foot_normal_forces,
+                                    self.cartesian_base_accel,
+                                    self.base_twist[3:])) # last item is base angular velocity
         if np.isnan(self.state).any():
             print('nans in state')
             breakpoint()
         # Not used in state, but used in _is_terminal() and _reward()    
         self.base_position = np.array(base_position)
-        self.base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
+        self.previous_base_twist = self.base_twist
 
 
     def _is_state_terminal(self) -> bool:
