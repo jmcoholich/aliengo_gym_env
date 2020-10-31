@@ -431,7 +431,7 @@ class AliengoEnv(gym.Env):
         # self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
         existence_reward = 0.0
-        termination_penalty = 10.0
+        termination_penalty = 0.0
         return base_x_velocity - 0.00001 * torque_penalty + existence_reward - termination_penalty * done
             #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
