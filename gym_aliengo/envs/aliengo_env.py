@@ -70,6 +70,11 @@ PUt together some slides
 have a framework to automatically save videos to wandb.
 plot entropy
 Give a reward of -10 for termination, instead of giving a +1 for not terminating. Run this on my home machine.
+
+
+There seems to be some episodes getting suck at eps len == 1 again... Am I saving the trained models??
+Looks like its due to the no_feet_on_ground. Maybe relax this condition, need to have feet off for 10 timesteps?
+Nah, the algorithm seems to be able to avoid that.
  '''
 class AliengoEnv(gym.Env):
 
@@ -145,7 +150,7 @@ class AliengoEnv(gym.Env):
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
-        self.max_torque = 40.0
+        self.max_torque = 80.0
         self.kp = 1.0 
         self.kd = 1.0
 
