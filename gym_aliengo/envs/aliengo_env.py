@@ -149,8 +149,8 @@ class AliengoEnv(gym.Env):
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
-        self.perturbation_rate = 0.01 # probability that a random perturbation is applied to the torso
-        self.max_torque = 80.0
+        self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
+        self.max_torque = 100.0
         self.kp = 1.0 
         self.kd = 1.0
 
@@ -474,6 +474,7 @@ class AliengoEnv(gym.Env):
 
 
     def _is_state_terminal(self) -> bool:
+        return False , ''
         ''' Calculates whether to end current episode due to failure based on current state. Does not consider timeout.
         Returns boolean and reason if True '''
 
