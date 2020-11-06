@@ -78,13 +78,14 @@ Nah, the algorithm seems to be able to avoid that.
  '''
 class AliengoEnv(gym.Env):
 
-    def __init__(self, render=False):
+    def __init__(self, render=False, n_hold_frames=10):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
         self.max_torque = 100.0
         self.kp = 1.0 
         self.kd = 1.0
+        self.n_hold_frames = n_hold_frames
         self._is_render = render
 
         if self._is_render:
@@ -250,7 +251,8 @@ class AliengoEnv(gym.Env):
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
             self._apply_perturbation()
-        p.stepSimulation(physicsClientId=self.client)
+        for _ in range(self.n_hold_frames):
+            p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         done, reason = self._is_state_terminal()
         self.reward = self._reward_function(done, reason)
@@ -486,14 +488,15 @@ class AliengoEnv(gym.Env):
         body_contact = self._is_non_foot_ground_contact()
 
         # 0.78 rad is about 45 deg
-        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
-        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
+        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
+        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
 
-        going_backwards = self.base_twist[0] <= -0.5
+        going_backwards = self.base_twist[0] <= -1.0
 
         self_collision = self._is_robot_self_collision()
 
-        no_feet_on_ground = (self.foot_normal_forces == 0).all()
+        # no_feet_on_ground = (self.foot_normal_forces == 0).all()
+        no_feet_on_ground = False
         if falling:
             reason = 'falling'
             # print(reason)
