@@ -79,7 +79,12 @@ Nah, the algorithm seems to be able to avoid that.
 class AliengoEnv(gym.Env):
 
     def __init__(self, render=False):
+        # Environment Options
         self._apply_perturbations = False
+        self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
+        self.max_torque = 100.0
+        self.kp = 1.0 
+        self.kd = 1.0
         self._is_render = render
 
         if self._is_render:
@@ -149,10 +154,7 @@ class AliengoEnv(gym.Env):
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
-        self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
-        self.max_torque = 100.0
-        self.kp = 1.0 
-        self.kd = 1.0
+       
 
         self._find_space_limits()
         # self.num_envs = 1
