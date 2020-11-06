@@ -474,7 +474,7 @@ class AliengoEnv(gym.Env):
 
 
     def _is_state_terminal(self) -> bool:
-        return False , ''
+        # return False , ''
         ''' Calculates whether to end current episode due to failure based on current state. Does not consider timeout.
         Returns boolean and reason if True '''
 
