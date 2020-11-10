@@ -78,15 +78,16 @@ Nah, the algorithm seems to be able to avoid that.
  '''
 class AliengoEnv(gym.Env):
 
-    def __init__(self, render=False, n_hold_frames=10):
+    def __init__(self, render=False):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
         self.max_torque = 100.0
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = n_hold_frames
+        self.n_hold_frames = 2
         self._is_render = render
+        self.eps_timeout = 2400 # number of steps to timeout after
 
         if self._is_render:
             self.client = p.connect(p.GUI)
@@ -155,6 +156,7 @@ class AliengoEnv(gym.Env):
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
         # self.previous_lower_limb_vels = np.zeros(4 * 6)
         # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
+        self.eps_step_counter = 0 # Used for triggering timeout
        
 
         self._find_space_limits()
@@ -255,11 +257,13 @@ class AliengoEnv(gym.Env):
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         done, reason = self._is_state_terminal()
-        self.reward = self._reward_function(done, reason)
+        self.reward = self._reward_function(reason)
 
         info = {'':''} # this is returned so that env.step() matches Open AI gym API
+        self.eps_step_counter += 1
         if done:
-            info['termination_reason'] = reason
+            info['TimeLimit.truncated'] = True
+            self.eps_step_counter = 0
         return self.state, self.reward, done, info
 
     
@@ -422,7 +426,7 @@ class AliengoEnv(gym.Env):
                                                 100 * np.ones(3)))
 
 
-    def _reward_function(self, done, reason) -> float:
+    def _reward_function(self, reason) -> float:
         ''' Calculates reward based off of current state '''
 
         base_x_velocity = self.base_twist[0]
@@ -439,46 +443,33 @@ class AliengoEnv(gym.Env):
         # self.previous_base_twist = base_twist 
         # self.previous_lower_limb_vels = lower_limb_vels
         # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
+
+        # terminations turned into penalties
         existence_reward = 0.0
-        termination_penalty = 0.0
-        return base_x_velocity - 0.00001 * torque_penalty + existence_reward - termination_penalty * done
+
+        base_z_position = self.base_position[2]
+        height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
+        body_contact = self._is_non_foot_ground_contact()
+        # 0.78 rad is about 45 deg
+        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
+        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
+
+        # going_backwards = self.base_twist[0] <= -1.0
+        self_collision = self._is_robot_self_collision()
+
+        no_feet_on_ground = (self.foot_normal_forces == 0).all()
+
+        other_penalties = height_out_of_bounds + body_contact + falling + self_collision
+        return base_x_velocity - 0.00001 * torque_penalty + existence_reward - other_penalties
             #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
 
 
-    def _update_state(self):
-
-        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices, physicsClientId=self.client)
-        self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
-        self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)])
-        self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
-
-        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
-        self.base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
-        self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
-        self.base_orientation = np.array(base_orientation)
-
-
-        self.foot_normal_forces, _ = self._get_foot_contacts()
-
-        self.state = np.concatenate((self.applied_torques, 
-                                    self.joint_positions,
-                                    self.joint_velocities,
-                                    self.base_orientation,
-                                    self.foot_normal_forces,
-                                    self.cartesian_base_accel,
-                                    self.base_twist[3:])) # last item is base angular velocity
-        if np.isnan(self.state).any():
-            print('nans in state')
-            breakpoint()
-        # Not used in state, but used in _is_terminal() and _reward()    
-        self.base_position = np.array(base_position)
-        self.previous_base_twist = self.base_twist
 
 
     def _is_state_terminal(self) -> bool:
-        # return False , ''
+        return self.eps_step_counter >= self.eps_timeout , ''
         ''' Calculates whether to end current episode due to failure based on current state. Does not consider timeout.
         Returns boolean and reason if True '''
 
@@ -515,6 +506,36 @@ class AliengoEnv(gym.Env):
             reason = ''
         return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision, no_feet_on_ground]), \
             reason
+
+
+    def _update_state(self):
+
+        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices, physicsClientId=self.client)
+        self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)])
+        self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
+
+        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
+        self.base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
+        self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
+        self.base_orientation = np.array(base_orientation)
+
+
+        self.foot_normal_forces, _ = self._get_foot_contacts()
+
+        self.state = np.concatenate((self.applied_torques, 
+                                    self.joint_positions,
+                                    self.joint_velocities,
+                                    self.base_orientation,
+                                    self.foot_normal_forces,
+                                    self.cartesian_base_accel,
+                                    self.base_twist[3:])) # last item is base angular velocity
+        if np.isnan(self.state).any():
+            print('nans in state')
+            breakpoint()
+        # Not used in state, but used in _is_terminal() and _reward()    
+        self.base_position = np.array(base_position)
+        self.previous_base_twist = self.base_twist
 
 
 if __name__ == '__main__':
