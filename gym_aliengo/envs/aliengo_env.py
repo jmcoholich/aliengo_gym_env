@@ -87,7 +87,7 @@ class AliengoEnv(gym.Env):
         self.kd = 1.0
         self.n_hold_frames = 2
         self._is_render = render
-        self.eps_timeout = 2400 # number of steps to timeout after
+        self.eps_timeout = 100 # number of steps to timeout after
 
         if self._is_render:
             self.client = p.connect(p.GUI)
