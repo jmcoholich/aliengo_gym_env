@@ -211,8 +211,8 @@ class AliengoEnv(gym.Env):
             else: # use the contact point with the max normal force when there is more than one contact on a leg
                 normals = [info[i][9] for i in range(len(info))]
                 contacts[i] = max(normals)
-                print('Number of contacts on one foot: %d' %len(info))
-                print('Normal Forces: ', normals,'\n')
+                # print('Number of contacts on one foot: %d' %len(info))
+                # print('Normal Forces: ', normals,'\n')
         contacts = np.array(contacts)
         if (contacts > 10_000).any():
             warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
@@ -466,19 +466,19 @@ class AliengoEnv(gym.Env):
              # + 0.1 * lower_limb_height_bonus
 
 
-
-
     def _is_state_terminal(self) -> bool:
         ''' Calculates whether to end current episode due to failure based on current state.
         Returns boolean and puts reason in info if True '''
         info = {'':''}
 
         timeout = (self.eps_step_counter >= self.eps_timeout)
+
+
         base_z_position = self.base_position[2]
-        height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
+        height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8)) 
         body_contact = self._is_non_foot_ground_contact() * 0
         # 0.78 rad is about 45 deg
-        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
+        falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any()) 
         # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
         going_backwards = (self.base_twist[0] <= -1.0) * 0
         self_collision = self._is_robot_self_collision() * 0
