@@ -85,7 +85,7 @@ class AliengoEnv(gym.Env):
         self.max_torque = 100.0
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 2
+        self.n_hold_frames = 1
         self._is_render = render
         self.eps_timeout = 100 # number of steps to timeout after
 
@@ -256,13 +256,12 @@ class AliengoEnv(gym.Env):
         for _ in range(self.n_hold_frames):
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
-        done, reason = self._is_state_terminal()
-        self.reward = self._reward_function(reason)
+        done, info = self._is_state_terminal()
+        self.reward = self._reward_function()
 
-        info = {'':''} # this is returned so that env.step() matches Open AI gym API
+        # info = {'':''} # this is returned so that env.step() matches Open AI gym API
         self.eps_step_counter += 1
         if done:
-            info['TimeLimit.truncated'] = True
             self.eps_step_counter = 0
         return self.state, self.reward, done, info
 
@@ -426,8 +425,9 @@ class AliengoEnv(gym.Env):
                                                 100 * np.ones(3)))
 
 
-    def _reward_function(self, reason) -> float:
+    def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
+        return 1.0, ''
 
         base_x_velocity = self.base_twist[0]
         # base_y_velocity = base_twist[1]
@@ -469,43 +469,38 @@ class AliengoEnv(gym.Env):
 
 
     def _is_state_terminal(self) -> bool:
-        return self.eps_step_counter >= self.eps_timeout , ''
-        ''' Calculates whether to end current episode due to failure based on current state. Does not consider timeout.
-        Returns boolean and reason if True '''
+        ''' Calculates whether to end current episode due to failure based on current state.
+        Returns boolean and puts reason in info if True '''
+        info = {'':''}
 
+        timeout = (self.eps_step_counter >= self.eps_timeout)
         base_z_position = self.base_position[2]
         height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-
-        body_contact = self._is_non_foot_ground_contact()
-
+        body_contact = self._is_non_foot_ground_contact() * 0
         # 0.78 rad is about 45 deg
         falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
         # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
+        going_backwards = (self.base_twist[0] <= -1.0) * 0
+        self_collision = self._is_robot_self_collision() * 0
 
-        going_backwards = self.base_twist[0] <= -1.0
-
-        self_collision = self._is_robot_self_collision()
-
-        # no_feet_on_ground = (self.foot_normal_forces == 0).all()
-        no_feet_on_ground = False
+        no_feet_on_ground = (self.foot_normal_forces == 0).all() * 0
         if falling:
-            reason = 'falling'
-            # print(reason)
-            # print(p.getEulerFromQuaternion(self.base_orientation))
+            info['termination_reason'] = 'falling'
         elif height_out_of_bounds:
-            reason = 'height_out_of_bounds'
+            info['termination_reason'] = 'height_out_of_bounds'
         elif body_contact:
-            reason = 'body_contact_with_ground'
+            info['termination_reason'] = 'body_contact_with_ground'
         elif going_backwards:
-            reason = 'going_backwards'
+            info['termination_reason'] = 'going_backwards'
         elif self_collision:
-            reason = 'self_collision'
+            info['termination_reason'] = 'self_collision'
         elif no_feet_on_ground:
-            reason = 'no_feet_on_ground'
-        else:
-            reason = ''
-        return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision, no_feet_on_ground]), \
-            reason
+            info['termination_reason'] = 'no_feet_on_ground'
+        elif timeout: # {'TimeLimit.truncated': True}
+            info['TimeLimit.truncated'] = True
+
+        return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision, no_feet_on_ground, \
+            timeout]), info
 
 
     def _update_state(self):
