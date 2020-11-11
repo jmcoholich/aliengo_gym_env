@@ -427,7 +427,7 @@ class AliengoEnv(gym.Env):
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
-        return 1.0, ''
+        return 1.0
 
         base_x_velocity = self.base_twist[0]
         # base_y_velocity = base_twist[1]
