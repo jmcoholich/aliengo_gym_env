@@ -427,7 +427,6 @@ class AliengoEnv(gym.Env):
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
-        return 1.0
 
         base_x_velocity = self.base_twist[0]
         # base_y_velocity = base_twist[1]
@@ -447,19 +446,20 @@ class AliengoEnv(gym.Env):
         # terminations turned into penalties
         existence_reward = 0.0
 
-        base_z_position = self.base_position[2]
-        height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        body_contact = self._is_non_foot_ground_contact()
-        # 0.78 rad is about 45 deg
-        falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
-        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
+        # base_z_position = self.base_position[2]
+        # height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
+        # body_contact = self._is_non_foot_ground_contact()
+        # # 0.78 rad is about 45 deg
+        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
+        # # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
 
-        # going_backwards = self.base_twist[0] <= -1.0
-        self_collision = self._is_robot_self_collision()
+        # # going_backwards = self.base_twist[0] <= -1.0
+        # self_collision = self._is_robot_self_collision()
 
-        no_feet_on_ground = (self.foot_normal_forces == 0).all()
+        # no_feet_on_ground = (self.foot_normal_forces == 0).all()
 
-        other_penalties = height_out_of_bounds + body_contact + falling + self_collision
+        # other_penalties = height_out_of_bounds + body_contact + falling + self_collision
+        other_penalties = 0.0
         return base_x_velocity - 0.00001 * torque_penalty + existence_reward - other_penalties
             #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
