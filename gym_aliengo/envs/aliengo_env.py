@@ -87,7 +87,7 @@ class AliengoEnv(gym.Env):
         self.kd = 1.0
         self.n_hold_frames = 1
         self._is_render = render
-        self.eps_timeout = 100 # number of steps to timeout after
+        self.eps_timeout = 240 * 20 # number of steps to timeout after
 
         if self._is_render:
             self.client = p.connect(p.GUI)
@@ -460,7 +460,7 @@ class AliengoEnv(gym.Env):
 
         # other_penalties = height_out_of_bounds + body_contact + falling + self_collision
         other_penalties = 0.0
-        return base_x_velocity - 0.00001 * torque_penalty + existence_reward - other_penalties
+        return base_x_velocity - 0.000005 * torque_penalty + existence_reward - other_penalties
             #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
