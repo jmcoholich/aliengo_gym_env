@@ -82,10 +82,10 @@ class AliengoEnv(gym.Env):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
-        self.max_torque = 100.0
+        self.max_torque = 200.0
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 1
+        self.n_hold_frames = 5
         self._is_render = render
         self.eps_timeout = 240 * 20 # number of steps to timeout after
 
@@ -242,6 +242,7 @@ class AliengoEnv(gym.Env):
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of +/- 1.0') 
             
+        # positionGains[[1,4,7,11]] = 2000 * self.kp
         p.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
