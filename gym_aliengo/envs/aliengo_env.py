@@ -82,10 +82,10 @@ class AliengoEnv(gym.Env):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
-        self.max_torque = 200.0
+        self.max_torque = 40.0 # can be 200 
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 5
+        self.n_hold_frames = 1 # can be 5
         self._is_render = render
         self.eps_timeout = 240 * 20 # number of steps to timeout after
         self.imitate_trot = False
@@ -486,7 +486,7 @@ class AliengoEnv(gym.Env):
     def _is_state_terminal(self) -> bool:
         ''' Calculates whether to end current episode due to failure based on current state.
         Returns boolean and puts reason in info if True '''
-        info = {'':''}
+        info = {}
 
         timeout = (self.eps_step_counter >= self.eps_timeout)
 
