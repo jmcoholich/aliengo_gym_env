@@ -262,8 +262,8 @@ class AliengoEnv(gym.Env):
             self._apply_perturbation()
         for _ in range(self.n_hold_frames):
             p.stepSimulation(physicsClientId=self.client)
-        self._update_state()
         self.eps_step_counter += 1
+        self._update_state()
         done, info = self._is_state_terminal()
         self.reward = self._reward_function()
 
@@ -291,6 +291,7 @@ class AliengoEnv(gym.Env):
         to ground and settle completely.'''
 
         starting_pos = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
+         -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
         p.resetBasePositionAndOrientation(self.quadruped,
                                             posObj=[0,0,0.48], 
                                             ornObj=[0,0,0,1.0],
@@ -312,7 +313,7 @@ class AliengoEnv(gym.Env):
         for i in range(500):
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
-        return self.state
+        return self.state.flatten()
 
 
     def render(self, mode='human'):
