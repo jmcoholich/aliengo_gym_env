@@ -85,10 +85,11 @@ class AliengoEnv(gym.Env):
         self.max_torque = 40.0 # can be 200 
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 1 # can be 5
+        self.n_hold_frames = 5 # can be 5
         self._is_render = render
         self.eps_timeout = 240 * 20 # number of steps to timeout after
         self.imitate_trot = False
+        self.n_actions_to_concat = 5 # this is the number of previous actions to concatenate to the state space.
 
         if self._is_render:
             self.client = p.connect(p.GUI)
@@ -135,7 +136,7 @@ class AliengoEnv(gym.Env):
         self.n_motors = 12
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 + self.imitate_trot
+        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.imitate_trot) * self.n_actions_to_concat
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.n_motors
         self.actions_ub = np.empty(self.action_space_dim)
@@ -145,7 +146,8 @@ class AliengoEnv(gym.Env):
         self.observations_ub = np.empty(self.state_space_dim)
         self.observations_lb = np.empty(self.state_space_dim)
 
-        self.state = np.zeros(self.state_space_dim)
+        self.state = np.zeros((self.n_actions_to_concat, self.state_space_dim)) # this array will be flattened when 
+                                                                                # returned env.step()
         self.applied_torques = np.zeros(self.n_motors)
         self.joint_velocities = np.zeros(self.n_motors)
         self.joint_positions = np.zeros(self.n_motors)
@@ -260,8 +262,8 @@ class AliengoEnv(gym.Env):
             self._apply_perturbation()
         for _ in range(self.n_hold_frames):
             p.stepSimulation(physicsClientId=self.client)
-        self.eps_step_counter += 1
         self._update_state()
+        self.eps_step_counter += 1
         done, info = self._is_state_terminal()
         self.reward = self._reward_function()
 
@@ -271,7 +273,7 @@ class AliengoEnv(gym.Env):
             if self.imitate_trot:
                 info['avg_trot_loss'] = self.trot_loss_history.mean()
                 self.trot_loss_history = np.array([])
-        return self.state, self.reward, done, info
+        return self.state.flatten(), self.reward, done, info
 
         
     def _apply_perturbation(self):
@@ -289,7 +291,6 @@ class AliengoEnv(gym.Env):
         to ground and settle completely.'''
 
         starting_pos = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
-          -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
         p.resetBasePositionAndOrientation(self.quadruped,
                                             posObj=[0,0,0.48], 
                                             ornObj=[0,0,0,1.0],
@@ -434,6 +435,9 @@ class AliengoEnv(gym.Env):
         if self.imitate_trot:
             self.observations_lb = np.concatenate((self.observations_lb, np.zeros(1)))
             self.observations_ub = np.concatenate((self.observations_ub, np.ones(1) * self.period))
+
+        self.observations_lb = np.tile(self.observations_lb, self.n_actions_to_concat)
+        self.observations_ub = np.tile(self.observations_ub, self.n_actions_to_concat)
             
 
 
@@ -537,7 +541,7 @@ class AliengoEnv(gym.Env):
 
         self.foot_normal_forces, _ = self._get_foot_contacts()
 
-        self.state = np.concatenate((self.applied_torques, 
+        current_state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
                                     self.joint_velocities,
                                     self.base_orientation,
@@ -546,10 +550,19 @@ class AliengoEnv(gym.Env):
                                     self.base_twist[3:])) # last item is base angular velocity
         
         if self.imitate_trot:
-            self.state = np.concatenate((self.state, np.array([self.cycle_clock])))
-        if np.isnan(self.state).any():
+            current_state = np.concatenate((self.state, np.array([self.cycle_clock])))
+        if np.isnan(current_state).any():
             print('nans in state')
             breakpoint()
+
+        if self.eps_step_counter == 0: 
+            # initialize the first state with the current_state at t = 0 repeated 
+            self.state = np.tile(current_state, (self.n_actions_to_concat, 1)) 
+        else: 
+            # delete last element in self.state, and add current_state to the beginning of self.state
+            self.state = np.delete(self.state, -1,axis=0)
+            self.state = np.insert(self.state, 0, current_state, axis=0)
+
         # Not used in state, but used in _is_terminal() and _reward()    
         self.base_position = np.array(base_position)
         self.previous_base_twist = self.base_twist
