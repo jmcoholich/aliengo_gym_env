@@ -85,11 +85,15 @@ class AliengoEnv(gym.Env):
         self.max_torque = 40.0 # can be 200 
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 5 # can be 5
+        self.n_hold_frames = 4 # can be 5
         self._is_render = render
         self.eps_timeout = 240 * 20 # number of steps to timeout after
-        self.imitate_trot = False
-        self.n_actions_to_concat = 5 # this is the number of previous actions to concatenate to the state space.
+        self.trot_prior = True
+        self.action_coeff = 0.5 # This is maximum amplitude of actions added to trot gait. 1 is maximum range, 0 means
+        # all actions are multiplied by zero. 
+        self.period = 0.8 # of imitated gait, in seconds
+
+        # self.n_actions_to_concat = 1 # this is the number of previous actions to concatenate to the state space.
 
         if self._is_render:
             self.client = p.connect(p.GUI)
@@ -136,7 +140,7 @@ class AliengoEnv(gym.Env):
         self.n_motors = 12
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.imitate_trot) * self.n_actions_to_concat
+        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.trot_prior)# * self.n_actions_to_concat
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.n_motors
         self.actions_ub = np.empty(self.action_space_dim)
@@ -146,7 +150,7 @@ class AliengoEnv(gym.Env):
         self.observations_ub = np.empty(self.state_space_dim)
         self.observations_lb = np.empty(self.state_space_dim)
 
-        self.state = np.zeros((self.n_actions_to_concat, self.state_space_dim)) # this array will be flattened when 
+        self.state = np.zeros(self.state_space_dim) # this array will be flattened when 
                                                                                 # returned env.step()
         self.applied_torques = np.zeros(self.n_motors)
         self.joint_velocities = np.zeros(self.n_motors)
@@ -162,8 +166,7 @@ class AliengoEnv(gym.Env):
         self.eps_step_counter = 0 # Used for triggering timeout
         self.t = 0 # represents the actual time
         self.cycle_clock = 0 # cycle time for imitation learning a gait
-        self.period = 0.8 # of imitated gait, in seconds
-        self.trot_loss_history = np.array([]) # return average trot_loss at end of episode
+        # self.trot_loss_history = np.array([]) # return average trot_loss at end of episode
 
         self._find_space_limits()
         # self.num_envs = 1
@@ -249,10 +252,15 @@ class AliengoEnv(gym.Env):
             raise ValueError('Action is out-of-bounds of +/- 1.0') 
             
         # positionGains[[1,4,7,11]] = 2000 * self.kp
+        if self.trot_prior: 
+            _action = self._actions_to_positions(action * self.action_coeff + self._trot())
+        else:
+            _action = self._actions_to_positions(action)
+
         p.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
-            targetPositions=self._actions_to_positions(action),
+            targetPositions=_action,
             forces=self.max_torque * np.ones(self.n_motors),
             positionGains=self.kp * np.ones(12),
             velocityGains=self.kd * np.ones(12),
@@ -270,10 +278,10 @@ class AliengoEnv(gym.Env):
         # info = {'':''} # this is returned so that env.step() matches Open AI gym API
         if done:
             self.eps_step_counter  = 0
-            if self.imitate_trot:
-                info['avg_trot_loss'] = self.trot_loss_history.mean()
-                self.trot_loss_history = np.array([])
-        return self.state.flatten(), self.reward, done, info
+            # if self.trot_prior:
+                # info['avg_trot_loss'] = self.trot_loss_history.mean()
+                # self.trot_loss_history = np.array([])
+        return self.state, self.reward, done, info
 
         
     def _apply_perturbation(self):
@@ -313,7 +321,7 @@ class AliengoEnv(gym.Env):
         for i in range(500):
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
-        return self.state.flatten()
+        return self.state
 
 
     def render(self, mode='human'):
@@ -433,22 +441,22 @@ class AliengoEnv(gym.Env):
                                                 1e4 * np.ones(4),
                                                 100 * np.ones(3),
                                                 100 * np.ones(3)))
-        if self.imitate_trot:
+        if self.trot_prior:
             self.observations_lb = np.concatenate((self.observations_lb, np.zeros(1)))
             self.observations_ub = np.concatenate((self.observations_ub, np.ones(1) * self.period))
 
-        self.observations_lb = np.tile(self.observations_lb, self.n_actions_to_concat)
-        self.observations_ub = np.tile(self.observations_ub, self.n_actions_to_concat)
+        # self.observations_lb = np.tile(self.observations_lb, self.n_actions_to_concat)
+        # self.observations_ub = np.tile(self.observations_ub, self.n_actions_to_concat)
             
 
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
 
-        if self.imitate_trot:
-            trot_penalty = self._trot_loss()
-        else:
-            trot_penalty = 0
+        # if self.trot_prior:
+        #     trot_penalty = self._trot_loss()
+        # else:
+        # trot_penalty = 0
 
         base_x_velocity = self.base_twist[0]
         # base_y_velocity = base_twist[1]
@@ -482,7 +490,7 @@ class AliengoEnv(gym.Env):
 
         # other_penalties = height_out_of_bounds + body_contact + falling + self_collision
         other_penalties = 0.0
-        return base_x_velocity - 0.000005 * torque_penalty + existence_reward - other_penalties - 0.5 * trot_penalty
+        return base_x_velocity - 0.000005 * torque_penalty + existence_reward - other_penalties 
             #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
              # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
              # + 0.1 * lower_limb_height_bonus
@@ -542,7 +550,7 @@ class AliengoEnv(gym.Env):
 
         self.foot_normal_forces, _ = self._get_foot_contacts()
 
-        current_state = np.concatenate((self.applied_torques, 
+        self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
                                     self.joint_velocities,
                                     self.base_orientation,
@@ -550,36 +558,45 @@ class AliengoEnv(gym.Env):
                                     self.cartesian_base_accel,
                                     self.base_twist[3:])) # last item is base angular velocity
         
-        if self.imitate_trot:
-            current_state = np.concatenate((self.state, np.array([self.cycle_clock])))
-        if np.isnan(current_state).any():
+        if self.trot_prior:
+            self.state = np.concatenate((self.state, np.array([self.cycle_clock])))
+        if np.isnan(self.state).any():
             print('nans in state')
             breakpoint()
 
-        if self.eps_step_counter == 0: 
-            # initialize the first state with the current_state at t = 0 repeated 
-            self.state = np.tile(current_state, (self.n_actions_to_concat, 1)) 
-        else: 
-            # delete last element in self.state, and add current_state to the beginning of self.state
-            self.state = np.delete(self.state, -1,axis=0)
-            self.state = np.insert(self.state, 0, current_state, axis=0)
+        # if self.eps_step_counter == 0: 
+        #     # initialize the first state with the current_state at t = 0 repeated 
+        #     self.state = np.tile(current_state, (self.n_actions_to_concat, 1)) 
+        # else: 
+        #     # delete last element in self.state, and add current_state to the beginning of self.state
+        #     self.state = np.delete(self.state, -1,axis=0)
+        #     self.state = np.insert(self.state, 0, current_state, axis=0)
 
         # Not used in state, but used in _is_terminal() and _reward()    
         self.base_position = np.array(base_position)
         self.previous_base_twist = self.base_twist
     
-    def _trot_loss(self): 
-        '''uses current state to calculate linear penalty based on difference with desired positions'''
+    # def _trot_loss(self): 
+    #     '''uses current state to calculate linear penalty based on difference with desired positions'''
+    #     trot  = np.ones(12)
+    #     trot[[0,3,6,9]] = 0
+    #     trot[[1,10]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.5 + 0.25 # thighs
+    #     trot[[2,11]] = 1 #np.sin((np.pi * 2 / period * t)) * 0.5 + 0.5
+    #     trot[[4,7]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.5 + 0.25 # thighs
+    #     trot[[5,8]]  = 1 # np.sin((np.pi * 2 / period * t) + np.pi) * 0.5 + 0.5
+
+    #     trot_loss = abs(trot - self.joint_positions).mean()
+    #     self.trot_loss_history = np.concatenate((self.trot_loss_history, np.array([trot_loss])))
+    #     return trot_loss
+    
+    def _trot(self):
         trot  = np.ones(12)
         trot[[0,3,6,9]] = 0
-        trot[[1,10]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.5 + 0.25 # thighs
-        trot[[2,11]] = 1 #np.sin((np.pi * 2 / period * t)) * 0.5 + 0.5
-        trot[[4,7]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.5 + 0.25 # thighs
-        trot[[5,8]]  = 1 # np.sin((np.pi * 2 / period * t) + np.pi) * 0.5 + 0.5
-
-        trot_loss = abs(trot - self.joint_positions).mean()
-        self.trot_loss_history = np.concatenate((self.trot_loss_history, np.array([trot_loss])))
-        return trot_loss
+        trot[[1,10]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.25 + 0.25 # thighs
+        trot[[2,11]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.25 + 0.75 # calves
+        trot[[4,7]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.25 + 0.25 # thighs
+        trot[[5,8]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.25 + 0.75 # calves
+        return trot
 
 
 
@@ -613,16 +630,33 @@ if __name__ == '__main__':
     #     img_list.append(img)
         
     with open('mocap.txt','r') as f:
-        for line in f:
-            positions =  env._positions_to_actions(np.array(line.split(',')[2:], dtype=np.float32))
-            obs,_ , done, _ =  env.step(positions)
-            if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
+        for line in f: 
+            positions = env._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
+            obs,_ , done, _ =  env.step(positions * 0)
+            if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid   
                 img = env.render('rgb_array')
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 img_list.append(img)
             counter +=1
-            # if counter ==100:
-            #     break
+            if counter == 800:
+                break
+    # for _ in range(400*4):
+    #     trot  = np.ones(12)
+    #     trot[[0,3,6,9]] = 0
+    #     trot[[1,10]] = np.sin((np.pi * 2 / env.period * counter/240.        )) * 0.25 + 0.25 # thighs
+    #     trot[[2,11]] = np.sin((np.pi * 2 / env.period * counter/240.        )) * 0.25 + 0.75 # calves
+    #     trot[[4,7]]  = np.sin((np.pi * 2 / env.period * counter/240.) + np.pi) * 0.25 + 0.25 # thighs
+    #     trot[[5,8]]  = np.sin((np.pi * 2 / env.period * counter/240.) + np.pi) * 0.25 + 0.75 # calves
+
+
+    #     _,_ , _, _ =  env.step(trot)
+    #     if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
+    #         img = env.render('rgb_array')
+    #         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    #         img_list.append(img)
+    #     counter +=1
+    #             # if counter ==100:
+    #             #     break
 
     height, width, layers = img.shape
     size = (width, height)
