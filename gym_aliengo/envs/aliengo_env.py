@@ -515,6 +515,10 @@ if __name__ == '__main__':
     import cv2
     env = gym.make('gym_aliengo:aliengo-v0')
     env.trot_prior = False
+    # p.setPhysicsEngineParameter(contactERP=0.99)
+    # p.setPhysicsEngineParameter(frictionERP=0.99)
+    # p.setPhysicsEngineParameter(erp=0.99)
+    
     env.reset()
     img = env.render('rgb_array')
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
@@ -555,18 +559,44 @@ if __name__ == '__main__':
                     counter +=1
             if counter == 240*2e10: 
                 break
+
+        
 '''
+
+    # # check friction coefficients: 
+    # for i in env.quadruped.foot_links:
+    #     p.changeDynamics(env.quadruped.quadruped, i, spinningFriction=1.0, rollingFriction=1.0, 
+    #                     contactDamping=1000, contactStiffness=30000, frictionAnchor=True)
+    #     p.changeDynamics(env.quadruped.quadruped, i, spinningFriction=1.0, rollingFriction=1.0, 
+    #                     contactDamping=1000, contactStiffness=30000, frictionAnchor=True)
+    # p.changeDynamics(env.plane, -1, spinningFriction=1.0, rollingFriction=1.0, frictionAnchor=True)
+
+    # param_idx = [1, 6, 7, 8, 9]
+    # names = ['lateral_friction', 'rolling_friction ', 'spinning_friction', 'contact_damping', 'contact_stiffness']
+    # for j in range(len(param_idx)):
+    #     print('\n' + names[j])
+    #     for i in env.quadruped.foot_links:
+    #         print(p.getDynamicsInfo(env.quadruped.quadruped, i, env.client)[param_idx[j]])
+    #     print(p.getDynamicsInfo(env.plane, -1, env.client)[param_idx[j]])
+
+
+
+    
     with open('mocap.txt','r') as f:
         for line_num, line in enumerate(f): 
-            positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
-            obs,_ , done, _ = env.step(positions)
-            if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
-                img = env.render('rgb_array')
-                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                img_list.append(img)
-            counter +=1
-            # if counter == 240*2e10: 
-            #     break
+            if line_num >= 240*3 + 240:
+                positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
+                obs,_ , done, _ = env.step(positions)
+                # for _ in range(3):
+
+                    # p.stepSimulation(physicsClientId=env.client)
+                if counter%3 == 0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
+                    img = env.render('rgb_array')
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    img_list.append(img)
+                counter +=1
+                # if line_num == 240*5: 
+                #     break
 
     # for _ in range(400*4):
     #     trot  = np.ones(12)
