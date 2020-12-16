@@ -6,16 +6,16 @@ register(
 )
 
 
-register(
-    id='MinitaurBulletEnv_PathFollow-v0',
-    entry_point='gym_aliengo.envs:MinitaurBulletEnv_PathFollow',
-)
 # register(
-#     id='aliengo-extrahard-v0',
-#     entry_point='gym_aliengo.envs:AliengoExtraHardEnv',
+#     id='MinitaurBulletEnv_PathFollow-v0',
+#     entry_point='gym_aliengo.envs:MinitaurBulletEnv_PathFollow',
 # )
-register(
-    id='MinitaurBulletEnv_Friction-v0',
-    entry_point='gym_aliengo.envs:MinitaurBulletEnv_Friction',
-)
+# # register(
+# #     id='aliengo-extrahard-v0',
+# #     entry_point='gym_aliengo.envs:AliengoExtraHardEnv',
+# # )
+# register(
+#     id='MinitaurBulletEnv_Friction-v0',
+#     entry_point='gym_aliengo.envs:MinitaurBulletEnv_Friction',
+# )
 

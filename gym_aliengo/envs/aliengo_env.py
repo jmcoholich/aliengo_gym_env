@@ -8,6 +8,7 @@ import time
 import numpy as np
 import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX
+from aliengo import Aliengo
 
 '''Agent can be trained with PPO algorithm from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail. Run:
  python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits
@@ -77,20 +78,20 @@ Looks like its due to the no_feet_on_ground. Maybe relax this condition, need to
 Nah, the algorithm seems to be able to avoid that.
  '''
 class AliengoEnv(gym.Env):
-
     def __init__(self, render=False):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
-        self.max_torque = 40.0 # can be 200 
+        self.max_torque = 40.0 
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 4 # can be 5
+        self.n_hold_frames = 4 
         self._is_render = render
-        self.eps_timeout = 240 * 20 # number of steps to timeout after
+        self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.trot_prior = True
         self.action_coeff = 0.5 # This is maximum amplitude of actions added to trot gait. 1 is maximum range, 0 means
         # all actions are multiplied by zero. 
+
         self.period = 0.8 # of imitated gait, in seconds
 
         # self.n_actions_to_concat = 1 # this is the number of previous actions to concatenate to the state space.
@@ -103,15 +104,16 @@ class AliengoEnv(gym.Env):
         if self.client == -1:
             raise RuntimeError('Pybullet could not connect to physics client')
 
-        urdfFlags = p.URDF_USE_SELF_COLLISION
+        # urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.client)
-        self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-                                    basePosition=[0,0,0.48], 
-                                    baseOrientation=[0,0,0,1], 
-                                    flags = urdfFlags, 
-                                    useFixedBase=False,
-                                    physicsClientId=self.client)
+        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+        #                             basePosition=[0,0,0.48], 
+        #                             baseOrientation=[0,0,0,1], 
+        #                             flags = urdfFlags, 
+        #                             useFixedBase=False,
+        #                             physicsClientId=self.client)
+        self.quadruped = Aliengo(pybullet_client=self.client, max_torque=self.max_torque, kp=self.kp, kd=self.kd)
 
         # # fixed base for debugging 
         # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
@@ -119,7 +121,7 @@ class AliengoEnv(gym.Env):
         #       physicsClientId=self.client)
 
         p.setGravity(0,0,-9.8, physicsClientId=self.client)
-        self.foot_links = [5, 9, 13, 17]
+        # self.quadruped.foot_links = [5, 9, 13, 17]
         # self.lower_legs = [2,5,8,11]
         # for l0 in self.lower_legs:
         #     for l1 in self.lower_legs:
@@ -132,29 +134,29 @@ class AliengoEnv(gym.Env):
         # below is the default. Simulation params need to be retuned if this is changed
         p.setTimeStep(1/240., physicsClientId=self.client)
 
-        for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
-            p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5, physicsClientId=self.client)
+        # for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
+        #     p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5, physicsClientId=self.client)
 
         # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL
-        self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
-        self.n_motors = 12
+        # self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
+        # self.quadruped.n_motors = 12
+
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
         self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.trot_prior)# * self.n_actions_to_concat
         self.num_joints = 18 # This includes fixed joints from the URDF
-        self.action_space_dim = self.n_motors
-        self.actions_ub = np.empty(self.action_space_dim)
-        self.actions_lb = np.empty(self.action_space_dim)
-        self.action_mean = np.empty(self.action_space_dim)
-        self.action_range = np.empty(self.action_space_dim)
-        self.observations_ub = np.empty(self.state_space_dim)
-        self.observations_lb = np.empty(self.state_space_dim)
+        self.action_space_dim = self.quadruped.n_motors
+        # self.actions_ub = np.empty(self.action_space_dim)
+        # self.actions_lb = np.empty(self.action_space_dim)
+        # self.action_mean = np.empty(self.action_space_dim)
+        # self.action_range = np.empty(self.action_space_dim)
+        # self.observations_ub = np.empty(self.state_space_dim)
+        # self.observations_lb = np.empty(self.state_space_dim)
 
-        self.state = np.zeros(self.state_space_dim) # this array will be flattened when 
-                                                                                # returned env.step()
-        self.applied_torques = np.zeros(self.n_motors)
-        self.joint_velocities = np.zeros(self.n_motors)
-        self.joint_positions = np.zeros(self.n_motors)
+        self.state = np.zeros(self.state_space_dim) 
+        self.applied_torques = np.zeros(self.quadruped.n_motors)
+        self.joint_velocities = np.zeros(self.quadruped.n_motors)
+        self.joint_positions = np.zeros(self.quadruped.n_motors)
         self.base_orientation = np.zeros(4)
         self.foot_normal_forces = np.zeros(4)
         self.cartesian_base_accel = np.zeros(3) 
@@ -168,19 +170,19 @@ class AliengoEnv(gym.Env):
         self.cycle_clock = 0 # cycle time for imitation learning a gait
         # self.trot_loss_history = np.array([]) # return average trot_loss at end of episode
 
-        self._find_space_limits()
-        # self.num_envs = 1
 
         self.reward = 0 # this is to store most recent reward
+        self.actions_lb, self.actions_ub = self.quadruped.get_joint_position_bounds()
         self.action_space = spaces.Box(
-            low=-np.ones(self.action_space_dim),
-            high=np.ones(self.action_space_dim),
+            low=self.actions_lb,
+            high=self.actions_ub,
             dtype=np.float32
             )
 
+        observation_lb, observation_ub = self._find_space_limits()
         self.observation_space = spaces.Box(
-            low=self.observations_lb,
-            high=self.observations_ub,
+            low=observations_lb,
+            high=observations_ub,
             dtype=np.float32
             )
 
@@ -190,35 +192,31 @@ class AliengoEnv(gym.Env):
 
         contact = False
         for i in range(self.num_joints):
-            if i in self.foot_links: # the feet themselves are allow the touch the ground
+            if i in self.quadruped.foot_links: # the feet themselves are allow the touch the ground
                 continue
-            points = p.getContactPoints(self.quadruped, self.plane, linkIndexA=i, physicsClientId=self.client)
+            points = p.getContactPoints(self.quadruped.quadruped, self.plane, linkIndexA=i, physicsClientId=self.client)
             if len(points) != 0:
                 contact = True
         return contact
-
-    def _is_robot_self_collision(self):
-        '''Returns true if any of the robot links are colliding with any other link'''
-
-        points = p.getContactPoints(self.quadruped, self.quadruped, physicsClientId=self.client)
-        return len(points) > 0
 
 
     def _get_foot_contacts(self):
         '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
 
         contacts = [0] * 4
-        for i in range(len(self.foot_links)):
-            info = p.getContactPoints(self.quadruped, 
+        for i in range(len(self.quadruped.foot_links)):
+            info = p.getContactPoints(self.quadruped.quadruped, 
                                         self.plane, 
-                                        linkIndexA=self.foot_links[i],
+                                        linkIndexA=self.quadruped.foot_links[i],
                                         physicsClientId=self.client)
             if len(info) == 0: # leg does not contact ground
                 contacts[i] = 0 
             elif len(info) == 1: # leg has one contact with ground
                 contacts[i] = info[0][9] # contact normal force
-            else: # use the contact point with the max normal force when there is more than one contact on a leg
-                normals = [info[i][9] for i in range(len(info))]
+            else: # use the contact point with the max normal force when there is more than one contact on a leg 
+                #TODO investigate scenarios with more than one contact point and maybe do something better (mean 
+                # or norm of contact forces?)
+                normals = [info[i][9] for i in range(len(info))] 
                 contacts[i] = max(normals)
                 # print('Number of contacts on one foot: %d' %len(info))
                 # print('Normal Forces: ', normals,'\n')
@@ -227,46 +225,47 @@ class AliengoEnv(gym.Env):
             warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
 
         # begin code for debugging foot contacts
-        debug = [0] * 4
-        for i in range(len(self.foot_links)):
-            info = p.getContactPoints(self.quadruped, 
-                                        self.plane, 
-                                        linkIndexA=self.foot_links[i],
-                                        physicsClientId=self.client)
-            if len(info) == 0: # leg does not contact ground
-                debug[i] = 0 
-            elif len(info) == 1: # leg has one contact with ground
-                debug[i] = info[0][9] # contact normal force
-            else: # use the contact point with the max normal force when there is more than one contact on a leg
-                normals = [info[i][9] for i in range(len(info))]
-                debug[i] = normals
-                # print('\nmultiple contacts' + '*' * 100 + '\n')
-        debug = debug
-        return contacts, debug
+        # debug = [0] * 4
+        # for i in range(len(self.quadruped.foot_links)):
+        #     info = p.getContactPoints(self.quadruped.quadruped, 
+        #                                 self.plane, 
+        #                                 linkIndexA=self.quadruped.foot_links[i],
+        #                                 physicsClientId=self.client)
+        #     if len(info) == 0: # leg does not contact ground
+        #         debug[i] = 0 
+        #     elif len(info) == 1: # leg has one contact with ground
+        #         debug[i] = info[0][9] # contact normal force
+        #     else: # use the contact point with the max normal force when there is more than one contact on a leg
+        #         normals = [info[i][9] for i in range(len(info))]
+        #         debug[i] = normals
+        #         # print('\nmultiple contacts' + '*' * 100 + '\n')
+        # debug = debug
+        return contacts #, debug
 
 
     def step(self, action):
         # action = np.clip(action, self.action_space.low, self.action_space.high)
-        if not ((-1.0 <= action) & (action <= 1.0)).all():
+        if not ((self.action_lb <= action) & (action <= self.action_ub)).all():
             print("Action passed to env.step(): ", action)
-            raise ValueError('Action is out-of-bounds of +/- 1.0') 
+            raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
             
-        # positionGains[[1,4,7,11]] = 2000 * self.kp
         if self.trot_prior: 
-            _action = self._actions_to_positions(action * self.action_coeff + self._trot())
+            action = action * self.action_coeff + self._trot()
         else:
-            _action = self._actions_to_positions(action)
+            action = action
 
-        p.setJointMotorControlArray(self.quadruped,
-            self.motor_joint_indices,
-            controlMode=p.POSITION_CONTROL,
-            targetPositions=_action,
-            forces=self.max_torque * np.ones(self.n_motors),
-            positionGains=self.kp * np.ones(12),
-            velocityGains=self.kd * np.ones(12),
-            physicsClientId=self.client)
+        # p.setJointMotorControlArray(self.quadruped,
+        #     self.motor_joint_indices,
+        #     controlMode=p.POSITION_CONTROL,
+        #     targetPositions=_action,
+        #     forces=self.max_torque * np.ones(self.quadruped.n_motors),
+        #     positionGains=self.kp * np.ones(12),
+        #     velocityGains=self.kd * np.ones(12),
+        #     physicsClientId=self.client)
+        self.quadruped.set_joint_position_targets(action)
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
+            raise NotImplementedError
             self._apply_perturbation()
         for _ in range(self.n_hold_frames):
             p.stepSimulation(physicsClientId=self.client)
@@ -277,7 +276,7 @@ class AliengoEnv(gym.Env):
 
         # info = {'':''} # this is returned so that env.step() matches Open AI gym API
         if done:
-            self.eps_step_counter  = 0
+            self.eps_step_counter = 0
             # if self.trot_prior:
                 # info['avg_trot_loss'] = self.trot_loss_history.mean()
                 # self.trot_loss_history = np.array([])
@@ -285,6 +284,7 @@ class AliengoEnv(gym.Env):
 
         
     def _apply_perturbation(self):
+        raise NotImplementedError
         if np.random.rand() > 0.5: # apply force
             force = tuple(10 * (np.random.rand(3) - 0.5))
             p.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME, physicsClientId=self.client)
@@ -298,27 +298,13 @@ class AliengoEnv(gym.Env):
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
-        starting_pos = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
-         -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
-        p.resetBasePositionAndOrientation(self.quadruped,
+        p.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,0.48], 
                                             ornObj=[0,0,0,1.0],
                                             physicsClientId=self.client) 
-        for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
-                        p.resetJointState(self.quadruped, 
-                        self.motor_joint_indices[i],
-                        starting_pos[i],
-                        targetVelocity=0,
-                        physicsClientId=self.client)
-        p.setJointMotorControlArray(self.quadruped,
-                                    self.motor_joint_indices,
-                                    controlMode=p.POSITION_CONTROL,
-                                    targetPositions=starting_pos,
-                                    forces=self.max_torque * np.ones(self.n_motors),
-                                    positionGains=self.kp * np.ones(12),
-                                    velocityGains=self.kd * np.ones(12),
-                                    physicsClientId=self.client)
-        for i in range(500):
+
+        self.quadruped.reset_joint_positions() # will put all joints at default starting positions
+        for i in range(500): # to let the robot settle on the ground.
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         return self.state
@@ -330,7 +316,8 @@ class AliengoEnv(gym.Env):
         RENDER_WIDTH = 480 
         RENDER_HEIGHT = 360
 
-        base_x_velocity = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()[0]
+        base_x_velocity = np.array(p.getBaseVelocity(self.quadruped.quadruped, 
+                                    physicsClientId=self.client)).flatten()[0]
         torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
 
         # RENDER_WIDTH = 960 
@@ -340,7 +327,7 @@ class AliengoEnv(gym.Env):
         # RENDER_HEIGHT = 1080
 
         if mode == 'rgb_array':
-            base_pos, _ = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
+            base_pos, _ = p.getBasePositionAndOrientation(self.quadruped.quadruped, physicsClientId=self.client)
             # base_pos = self.minitaur.GetBasePosition()
             view_matrix = p.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=base_pos,
@@ -362,17 +349,18 @@ class AliengoEnv(gym.Env):
                 projectionMatrix=proj_matrix,
                 renderer=p.ER_BULLET_HARDWARE_OPENGL,
                 physicsClientId=self.client)
-            rgb_array = np.array(px)
-            rgb_array = rgb_array[:, :, :3]
-            img = putText(np.float32(rgb_array), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
+            img = np.array(px)
+            img = img[:, :, :3]
+            img = putText(np.float32(img), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             img = putText(np.float32(img), 'Torque Penalty Term: ' + str(torque_pen)[:8], (1, 80), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             img = putText(np.float32(img), 'Total Rew: ' + str(torque_pen + base_x_velocity)[:8], (1, 100), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            _, foot_contacts = self._get_foot_contacts()
+            foot_contacts = self._get_foot_contacts()
             for i in range(4):
                 if type(foot_contacts[i]) is list: # multiple contacts
+                    assert False
                     num = np.array(foot_contacts[i]).round(2)
                 else:
                     num = round(foot_contacts[i], 2)
@@ -385,7 +373,7 @@ class AliengoEnv(gym.Env):
                             (200, 60 + 20 * 4), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             img = putText(np.float32(img), 
-                            'Self Collision: ' + str(self._is_robot_self_collision()), 
+                            'Self Collision: ' + str(self.quadruped.self_collision()), 
                             (200, 60 + 20 * 5), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             return np.uint8(img)
@@ -395,105 +383,52 @@ class AliengoEnv(gym.Env):
 
 
     def close(self):
+        '''I belive this is required for an Open AI gym env.'''
         pass
 
-    def _positions_to_actions(self, positions):
-        return (positions - self.action_mean) / (self.action_range * 0.5)
+    # def _positions_to_actions(self, positions):
+    #     return (positions - self.action_mean) / (self.action_range * 0.5)
   
 
-    def _actions_to_positions(self, actions):
-        return actions * (self.action_range * 0.5) + self.action_mean
+    # def _actions_to_positions(self, actions):
+    #     return actions * (self.action_range * 0.5) + self.action_mean
 
 
     def _find_space_limits(self):
         ''' find upper and lower bounds of action and observation spaces''' 
 
-       # find bounds of action space 
-        for i in range(self.n_motors): 
-            joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i], physicsClientId=self.client)
-            # bounds on joint position
-            self.actions_lb[i] = joint_info[8]
-            self.actions_ub[i] = joint_info[9]
-            
-        # no joint limits given for the thigh joints, so set them to plus/minus 90 degrees
-        for i in range(self.action_space_dim):
-            if self.actions_ub[i] <= self.actions_lb[i]:
-                self.actions_lb[i] = -3.14159 * 0.5
-                self.actions_ub[i] = 3.14159 * 0.5
+        torque_lb, torque_ub = self.quadruped.get_joint_torque_bounds()
+        position_lb, position_ub = self.quadruped.get_joint_position_bounds()
+        velocity_lb, velocity_ub = self.quadruped.get_joint_velocity_bounds()
+        observations_lb = np.concatenate((torque_lb, 
+                                        position_lb,
+                                        velocity_lb, 
+                                        -0.78 * np.ones(4), # this is for base orientation in quaternions
+                                        np.zeros(4), # foot normal forces
+                                        -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
+                                        -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
 
-        self.action_mean = (self.actions_ub + self.actions_lb)/2 
-        self.action_range = self.actions_ub - self.actions_lb
-
-        # find the bounds of the state space (joint torque, joint position, joint velocity, base orientation, cartesian
-        # base accel, base angular velocity)
-        self.observations_lb = np.concatenate((-self.max_torque * np.ones(12), 
-                                                self.actions_lb,
-                                                -40 * np.ones(12), 
-                                                -0.78 * np.ones(4),
-                                                np.zeros(4),
-                                                -100 * np.ones(3),
-                                                -100 * np.ones(3)))
-
-        self.observations_ub = np.concatenate((self.max_torque * np.ones(12), 
-                                                self.actions_ub, 
-                                                40 * np.ones(12), 
-                                                0.78 * np.ones(4),
-                                                1e4 * np.ones(4),
-                                                100 * np.ones(3),
-                                                100 * np.ones(3)))
+        observations_ub = np.concatenate((torque_ub, 
+                                        position_ub, 
+                                        velocity_ub, 
+                                        0.78 * np.ones(4),
+                                        1e4 * np.ones(4), # arbitrary bound
+                                        1e5 * np.ones(3),
+                                        1e5 * np.ones(3)))
         if self.trot_prior:
-            self.observations_lb = np.concatenate((self.observations_lb, np.zeros(1)))
-            self.observations_ub = np.concatenate((self.observations_ub, np.ones(1) * self.period))
+            observations_lb = np.concatenate((observations_lb, np.zeros(1)))
+            observations_ub = np.concatenate((observations_ub, np.ones(1) * self.period))
 
-        # self.observations_lb = np.tile(self.observations_lb, self.n_actions_to_concat)
-        # self.observations_ub = np.tile(self.observations_ub, self.n_actions_to_concat)
+        return observations_lb, observations_ub
             
-
 
     def _reward_function(self) -> float:
         ''' Calculates reward based off of current state '''
 
-        # if self.trot_prior:
-        #     trot_penalty = self._trot_loss()
-        # else:
-        # trot_penalty = 0
-
         base_x_velocity = self.base_twist[0]
-        # base_y_velocity = base_twist[1]
-        # base_accel_penalty = np.power(base_twist[1:] - self.previous_base_twist[1:], 2).mean()
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        # lower_limb_states = list(p.getLinkStates(self.quadruped, self.lower_legs, computeLinkVelocity=True))
-        # lower_limb_vels = np.array([lower_limb_states[i][6] + lower_limb_states[i][7] for i in range(4)]).flatten()
-        # lower_limb_accel_penalty = np.power(lower_limb_vels - self.previous_lower_limb_vels, 2).mean()
-        # orientation =  np.array(list(p.getEulerFromQuaternion(self.base_orientation)))
+        return base_x_velocity - 0.000005 * torque_penalty 
 
-        # lower_limb_height_bonus = np.array([lower_limb_states[i][0][2] for i in range(4)]).mean()
-        # orientation_pen = np.sum(np.power(orientation, 2))
-        # self.previous_base_twist = base_twist 
-        # self.previous_lower_limb_vels = lower_limb_vels
-        # print(base_x_velocity , 0.0001 * torque_penalty , 0.01 * base_accel_penalty , 0.01 * lower_limb_accel_penalty, 0.1 * lower_limb_height_bonus)
-
-        # terminations turned into penalties
-        existence_reward = 0.0
-
-        # base_z_position = self.base_position[2]
-        # height_out_of_bounds = (base_z_position < 0.23) or (base_z_position > 0.8)
-        # body_contact = self._is_non_foot_ground_contact()
-        # # 0.78 rad is about 45 deg
-        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any() 
-        # # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
-
-        # # going_backwards = self.base_twist[0] <= -1.0
-        # self_collision = self._is_robot_self_collision()
-
-        # no_feet_on_ground = (self.foot_normal_forces == 0).all()
-
-        # other_penalties = height_out_of_bounds + body_contact + falling + self_collision
-        other_penalties = 0.0
-        return base_x_velocity - 0.000005 * torque_penalty + existence_reward - other_penalties 
-            #-0.01*orientation_pen#- 0.01 * base_accel_penalty \
-             # - 0.01 * lower_limb_accel_penalty - 0.1 * abs(base_y_velocity) # \
-             # + 0.1 * lower_limb_height_bonus
 
 
     def _is_state_terminal(self) -> bool:
@@ -511,7 +446,7 @@ class AliengoEnv(gym.Env):
         falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any()) 
         # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
         going_backwards = (self.base_twist[0] <= -1.0) * 0
-        self_collision = self._is_robot_self_collision() * 0
+        self_collision = self.quadruped.self_collision() * 0
 
         no_feet_on_ground = (self.foot_normal_forces == 0).all() * 0
         if falling:
@@ -535,20 +470,15 @@ class AliengoEnv(gym.Env):
 
     def _update_state(self):
 
-        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices, physicsClientId=self.client)
-        self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
-        self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)])
-        self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
-
-        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)
-        self.base_twist = np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
+        self.joint_positions, self.joint_velocities, _, self.applied_torques = self.quadruped.get_joint_states()
+        self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
+        self.base_twist = self.quadruped.get_base_twist()
         self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
-        self.base_orientation = np.array(base_orientation)
 
         self.t = self.eps_step_counter * self.n_hold_frames / 240.
         self.cycle_clock = self.t % self.period
 
-        self.foot_normal_forces, _ = self._get_foot_contacts()
+        self.foot_normal_forces = self._get_foot_contacts()
 
         self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
@@ -564,30 +494,9 @@ class AliengoEnv(gym.Env):
             print('nans in state')
             breakpoint()
 
-        # if self.eps_step_counter == 0: 
-        #     # initialize the first state with the current_state at t = 0 repeated 
-        #     self.state = np.tile(current_state, (self.n_actions_to_concat, 1)) 
-        # else: 
-        #     # delete last element in self.state, and add current_state to the beginning of self.state
-        #     self.state = np.delete(self.state, -1,axis=0)
-        #     self.state = np.insert(self.state, 0, current_state, axis=0)
-
         # Not used in state, but used in _is_terminal() and _reward()    
-        self.base_position = np.array(base_position)
         self.previous_base_twist = self.base_twist
     
-    # def _trot_loss(self): 
-    #     '''uses current state to calculate linear penalty based on difference with desired positions'''
-    #     trot  = np.ones(12)
-    #     trot[[0,3,6,9]] = 0
-    #     trot[[1,10]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.5 + 0.25 # thighs
-    #     trot[[2,11]] = 1 #np.sin((np.pi * 2 / period * t)) * 0.5 + 0.5
-    #     trot[[4,7]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.5 + 0.25 # thighs
-    #     trot[[5,8]]  = 1 # np.sin((np.pi * 2 / period * t) + np.pi) * 0.5 + 0.5
-
-    #     trot_loss = abs(trot - self.joint_positions).mean()
-    #     self.trot_loss_history = np.concatenate((self.trot_loss_history, np.array([trot_loss])))
-    #     return trot_loss
     
     def _trot(self):
         trot  = np.ones(12)
@@ -597,7 +506,6 @@ class AliengoEnv(gym.Env):
         trot[[4,7]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.25 + 0.25 # thighs
         trot[[5,8]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.25 + 0.75 # calves
         return trot
-
 
 
 if __name__ == '__main__':
@@ -631,14 +539,14 @@ if __name__ == '__main__':
         
     with open('mocap.txt','r') as f:
         for line in f: 
-            positions = env._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
-            obs,_ , done, _ =  env.step(positions * 0)
-            if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid   
+            positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
+            obs,_ , done, _ = env.step(positions)
+            if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
                 img = env.render('rgb_array')
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 img_list.append(img)
             counter +=1
-            if counter == 800:
+            if counter == 60 * 10: 
                 break
     # for _ in range(400*4):
     #     trot  = np.ones(12)
