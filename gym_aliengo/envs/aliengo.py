@@ -13,6 +13,7 @@ for the observation***
 
 import pybullet as p
 import numpy as np
+import os
 
 class Aliengo:
     def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0):
@@ -54,7 +55,7 @@ class Aliengo:
         '''
 
         assert isinstance(positions, np.ndarray)
-        assert ((-1.0 <= positions) & (positions <= 1.0)).all():
+        assert ((-1.0 <= positions) & (positions <= 1.0)).all(), '\nposition received: ' + str(positions) + '\n'
  
         positions = self._actions_to_positions(positions)
 
@@ -158,7 +159,7 @@ class Aliengo:
             positions = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
                             -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
 
-        for i in range(self.quadruped.n_motors): # for some reason there is no p.resetJointStates (plural)
+        for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
             p.resetJointState(self.quadruped, 
                                 self.motor_joint_indices[i],
                                 positions[i],

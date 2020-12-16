@@ -85,7 +85,7 @@ class AliengoEnv(gym.Env):
         self.max_torque = 40.0 
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 4 
+        self.n_hold_frames = 1 #TODO change back to 4
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.trot_prior = True
@@ -94,7 +94,7 @@ class AliengoEnv(gym.Env):
 
         self.period = 0.8 # of imitated gait, in seconds
 
-        # self.n_actions_to_concat = 1 # this is the number of previous actions to concatenate to the state space.
+        # self.n_action_to_concat = 1 # this is the number of previous actions to concatenate to the state space.
 
         if self._is_render:
             self.client = p.connect(p.GUI)
@@ -143,15 +143,15 @@ class AliengoEnv(gym.Env):
 
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.trot_prior)# * self.n_actions_to_concat
+        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.trot_prior)# * self.n_action_to_concat
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.quadruped.n_motors
-        # self.actions_ub = np.empty(self.action_space_dim)
-        # self.actions_lb = np.empty(self.action_space_dim)
+        # self.action_ub = np.empty(self.action_space_dim)
+        # self.action_lb = np.empty(self.action_space_dim)
         # self.action_mean = np.empty(self.action_space_dim)
         # self.action_range = np.empty(self.action_space_dim)
-        # self.observations_ub = np.empty(self.state_space_dim)
-        # self.observations_lb = np.empty(self.state_space_dim)
+        # self.observation_ub = np.empty(self.state_space_dim)
+        # self.observation_lb = np.empty(self.state_space_dim)
 
         self.state = np.zeros(self.state_space_dim) 
         self.applied_torques = np.zeros(self.quadruped.n_motors)
@@ -172,17 +172,17 @@ class AliengoEnv(gym.Env):
 
 
         self.reward = 0 # this is to store most recent reward
-        self.actions_lb, self.actions_ub = self.quadruped.get_joint_position_bounds()
+        self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
         self.action_space = spaces.Box(
-            low=self.actions_lb,
-            high=self.actions_ub,
+            low=self.action_lb,
+            high=self.action_ub,
             dtype=np.float32
             )
 
         observation_lb, observation_ub = self._find_space_limits()
         self.observation_space = spaces.Box(
-            low=observations_lb,
-            high=observations_ub,
+            low=observation_lb,
+            high=observation_ub,
             dtype=np.float32
             )
 
@@ -390,7 +390,7 @@ class AliengoEnv(gym.Env):
     #     return (positions - self.action_mean) / (self.action_range * 0.5)
   
 
-    # def _actions_to_positions(self, actions):
+    # def _action_to_positions(self, actions):
     #     return actions * (self.action_range * 0.5) + self.action_mean
 
 
@@ -400,7 +400,7 @@ class AliengoEnv(gym.Env):
         torque_lb, torque_ub = self.quadruped.get_joint_torque_bounds()
         position_lb, position_ub = self.quadruped.get_joint_position_bounds()
         velocity_lb, velocity_ub = self.quadruped.get_joint_velocity_bounds()
-        observations_lb = np.concatenate((torque_lb, 
+        observation_lb = np.concatenate((torque_lb, 
                                         position_lb,
                                         velocity_lb, 
                                         -0.78 * np.ones(4), # this is for base orientation in quaternions
@@ -408,7 +408,7 @@ class AliengoEnv(gym.Env):
                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
                                         -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
 
-        observations_ub = np.concatenate((torque_ub, 
+        observation_ub = np.concatenate((torque_ub, 
                                         position_ub, 
                                         velocity_ub, 
                                         0.78 * np.ones(4),
@@ -416,10 +416,10 @@ class AliengoEnv(gym.Env):
                                         1e5 * np.ones(3),
                                         1e5 * np.ones(3)))
         if self.trot_prior:
-            observations_lb = np.concatenate((observations_lb, np.zeros(1)))
-            observations_ub = np.concatenate((observations_ub, np.ones(1) * self.period))
+            observation_lb = np.concatenate((observation_lb, np.zeros(1)))
+            observation_ub = np.concatenate((observation_ub, np.ones(1) * self.period))
 
-        return observations_lb, observations_ub
+        return observation_lb, observation_ub
             
 
     def _reward_function(self) -> float:
@@ -514,6 +514,7 @@ if __name__ == '__main__':
 
     import cv2
     env = gym.make('gym_aliengo:aliengo-v0')
+    env.trot_prior = False
     env.reset()
     img = env.render('rgb_array')
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
@@ -537,8 +538,26 @@ if __name__ == '__main__':
     #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     #     img_list.append(img)
         
+
+    '''    
     with open('mocap.txt','r') as f:
-        for line in f: 
+        for line_num, line in enumerate(f): 
+            # if line_num%(env.n_hold_frames * 2) == 0: # Unitree meant for this mocap to played at frequency of 500 Hz
+            if line_num%(4 * 2) == 0: # Unitree meant for this mocap to played at frequency of 500 Hz #TODO change 4 back to env.n_hold_frames
+
+                positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32)) #TODO move this back below and remove for loop
+                for _ in range(4):
+                    obs,_ , done, _ = env.step(positions)
+                    if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
+                        img = env.render('rgb_array')
+                        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                        img_list.append(img)
+                    counter +=1
+            if counter == 240*2e10: 
+                break
+'''
+    with open('mocap.txt','r') as f:
+        for line_num, line in enumerate(f): 
             positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
             obs,_ , done, _ = env.step(positions)
             if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
@@ -546,8 +565,9 @@ if __name__ == '__main__':
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 img_list.append(img)
             counter +=1
-            if counter == 60 * 10: 
-                break
+            # if counter == 240*2e10: 
+            #     break
+
     # for _ in range(400*4):
     #     trot  = np.ones(12)
     #     trot[[0,3,6,9]] = 0
