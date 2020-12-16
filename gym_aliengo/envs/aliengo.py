@@ -9,8 +9,6 @@ dev notes
     - also just run aliengo_env.py for the mocap test case. 
 ***There is one major difference: This new implementation will return joint_positions as mapped from [-1, 1] even 
 for the observation***
-
-
 '''
 
 import pybullet as p
@@ -56,28 +54,38 @@ class Aliengo:
         '''
 
         assert isinstance(positions, np.ndarray)
-        _positions = self._actions_to_positions(positions)
+        assert ((-1.0 <= positions) & (positions <= 1.0)).all():
+ 
+        positions = self._actions_to_positions(positions)
 
         p.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
-            targetPositions=_positions,
+            targetPositions=positions,
             forces=self.max_torque * np.ones(self.n_motors),
-            positionGains=self.kp * np.ones(12),
-            velocityGains=self.kd * np.ones(12),
+            positionGains=self.kp * np.ones(self.n_motors),
+            velocityGains=self.kd * np.ones(self.n_motors),
             physicsClientId=self.client)
 
 
     def _positions_to_actions(self, positions):
+        '''Maps actual robot joint positions in radians to the range of [-1.0, 1.0]'''
+
         return (positions - self.position_mean) / (self.position_range * 0.5)
 
 
     def _actions_to_positions(self, actions):
+        '''
+        Takes actions or normalized positions in the range of [-1.0, 1.0] and maps them to actual joint positions in 
+        radians.
+        '''
+
         return actions * (self.position_range * 0.5) + self.position_mean
 
     
     def _find_position_bounds(self):
-
+        positions_lb = np.zeros(self.n_motors)
+        positions_ub = np.zeros(self.n_motors)
         # find bounds of action space 
         for i in range(self.n_motors): 
             joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i], physicsClientId=self.client)
@@ -86,13 +94,13 @@ class Aliengo:
             positions_ub[i] = joint_info[9]
             
         # no joint limits given for the thigh joints, so set them to plus/minus 90 degrees
-        for i in range(self.action_space_dim):
+        for i in range(self.n_motors):
             if positions_ub[i] <= positions_lb[i]:
                 positions_lb[i] = -3.14159 * 0.5
                 positions_ub[i] = 3.14159 * 0.5
 
         position_mean = (positions_ub + positions_lb)/2 
-        position_range = positions_ub - lf.positions_lb
+        position_range = positions_ub - positions_lb
 
         return positions_lb, positions_ub, position_mean, position_range
 
@@ -100,13 +108,13 @@ class Aliengo:
     def get_joint_position_bounds(self):
         '''Returns lower and upper bounds of the allowable joint positions as a numpy array. '''
 
-        return -np.ones(12), np.ones(12)
+        return -np.ones(self.n_motors), np.ones(self.n_motors)
 
 
     def get_joint_velocity_bounds(self):
         '''The value 40 is from the Aliengo URDF.'''
 
-        return -np.ones(12) * 40, np.ones(12) * 40
+        return -np.ones(self.n_motors) * 40, np.ones(self.n_motors) * 40
     
 
     def get_joint_torque_bounds(self):
@@ -117,7 +125,7 @@ class Aliengo:
         torque to sometimes go slightly out of the bounds of self.max_torque? 
          '''
 
-        return - np.ones(12) * self.max_torque, np.ones(12) * self.max_torque
+        return - np.ones(self.n_motors) * self.max_torque, np.ones(self.n_motors) * self.max_torque
 
     
     def get_joint_states(self):
@@ -158,7 +166,7 @@ class Aliengo:
                                 physicsClientId=self.client)
 
         ''' TODO: see if the following is actually necessary. i.e. does pybullet retain motor control targets after you 
-         Reset joint positions? '''
+         Reset joint positions? If so, the following is necessary'''
 
         p.setJointMotorControlArray(self.quadruped,
                                     self.motor_joint_indices,
