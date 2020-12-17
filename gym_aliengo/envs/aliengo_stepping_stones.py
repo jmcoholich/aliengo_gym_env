@@ -111,6 +111,9 @@ class AliengoSteppingStones(gym.Env):
             dtype=np.float32
             )
 
+        self._first_run = True # used so that I don't call _remove_stepping_stones on the first run
+        self._stone_ids = []
+
 
     def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
         """Detect if any parts of the robot, other than the feet, are touching the ground."""
@@ -192,18 +195,29 @@ class AliengoSteppingStones(gym.Env):
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
+        if not self._first_run:
+            self._remove_stepping_stones()
+        else:
+            self._first_run = False
+        self._create_stepping_stones()
+
         p.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,self.height + 0.48], 
                                             ornObj=[0,0,0,1.0],
                                             physicsClientId=self.client) 
-
-        self._create_stepping_stones()
 
         self.quadruped.reset_joint_positions() # will put all joints at default starting positions
         for i in range(500): # to let the robot settle on the ground.
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         return self.state
+    
+    
+    def _remove_stepping_stones(self):
+        for id in self._stone_ids:
+            p.removeBody(id)
+        self._stone_ids = []
+
     
     def _create_stepping_stones(self):
         start_block = p.createCollisionShape(p.GEOM_BOX, 
@@ -220,9 +234,12 @@ class AliengoSteppingStones(gym.Env):
         stone_heights = (np.random.rand(n_stones) - 0.5) * self.stone_height_range + self.height/2.0 
         stone_x = np.random.rand(n_stones) * self.course_length + 1.0
         stone_y = (np.random.rand(n_stones) - 0.5) * self.course_width
+
+        self._stone_ids = [start_body, end_body]
         for i in range(n_stones):
-            p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
-                                basePosition=[stone_x[i], stone_y[i], stone_heights[i]])
+            id = p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
+                                    basePosition=[stone_x[i], stone_y[i], stone_heights[i]])
+            self._stone_ids.append(id)
 
     
     def _get_heightmap(self):
@@ -374,7 +391,8 @@ class AliengoSteppingStones(gym.Env):
 
         base_x_velocity = self.base_twist[0]
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        return base_x_velocity - 0.000005 * torque_penalty 
+        finish_bonus = (self.base_position[0] >= self.course_length + 2) * 20 #TODO check this
+        return base_x_velocity - 0.000005 * torque_penalty + finish_bonus
 
 
 
@@ -424,7 +442,6 @@ class AliengoSteppingStones(gym.Env):
 
         self.t = self.eps_step_counter * self.n_hold_frames / 240.
 
-
         self.foot_normal_forces = self._get_foot_contacts()
         
         self.state = np.concatenate((self.applied_torques, 
@@ -436,7 +453,6 @@ class AliengoSteppingStones(gym.Env):
                                     self.base_twist[3:],
                                     self._get_heightmap().flatten())) # last item is base angular velocity
         
-
         if np.isnan(self.state).any():
             print('nans in state')
             breakpoint()
@@ -448,8 +464,9 @@ class AliengoSteppingStones(gym.Env):
 if __name__ == '__main__':
     env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
     env.reset()
-    print(p.getBodyUniqueId())
-    env._get_heightmap()
+    time.sleep(5)
+    env.reset()
+    # env._get_heightmap()
     while True:
         time.sleep(1)
 
