@@ -328,7 +328,7 @@ class AliengoSteppingStones(gym.Env):
         return relative_z_heights.reshape((self.grid_len, self.grid_len))
         
 
-    def render(self, client=None, mode='human'):
+    def render(self, mode='human', client=None):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
 
         if client == None: # for some reason I can't use self.client as a default value in the function definition line.
@@ -453,15 +453,19 @@ class AliengoSteppingStones(gym.Env):
         fell = self.base_position[2] <= (self.height - self.stone_height_range/2.0)
         reached_goal = (self.base_position[0] >= self.course_length + 2)
         timeout = (self.eps_step_counter >= self.eps_timeout)
+        # I don't care about how much the robot yaws for termination, only if its flipped on its back.
+        flipping = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78*2.5, 1e10]).any())
 
-        if fell:
+        if flipping:
+            info['termination_reason'] = 'flipping'
+        elif fell:
             info['termination_reason'] = 'fell'
         elif reached_goal:
             info['termination_reason'] = 'reached_goal'
         elif timeout: # {'TimeLimit.truncated': True}
             info['TimeLimit.truncated'] = True
 
-        return any([fell, reached_goal, timeout]), info
+        return any([fell, reached_goal, timeout, flipping]), info
 
 
     def _update_state(self):
