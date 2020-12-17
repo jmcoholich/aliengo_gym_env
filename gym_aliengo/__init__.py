@@ -1,8 +1,13 @@
 from gym.envs.registration import register
 
 register(
-    id='aliengo-v0',
+    id='Aliengo-v0',
     entry_point='gym_aliengo.envs:AliengoEnv',
+)
+
+register(
+    id='AliengoSteppingStones-v0',
+    entry_point='gym_aliengo.envs:AliengoSteppingStones',
 )
 
 

@@ -10,91 +10,25 @@ import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX
 from gym_aliengo.envs import aliengo
 
-'''Agent can be trained with PPO algorithm from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail. Run:
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits
 
-default params with 10x samples:
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test4 --seed 4
-
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/new4 --seed 4
-
-
-Things to try
-- plot entropy (I know the PPO kostrikov is logging lots of stuff), and plot other stuff too. Try wandb for this. Also use tmux lol.
-- higher penalty on torques
-
-
-Things I have tried
-- get simulation GUI on my laptop and probe it so I know pm 1 produces desired range of motion 
-- hyperparam sweep
-- normalize action space to fall within pm 1
-- changing max torque available 
-- making sure my changes to avoid jumping on startup were realized (pip install -e .)
-- printing reward function to video
-- letting train longer
-- made sure its not always using max force
-- fixed issue where I didn't specify the PhysicsclientID
-- Add a reward just for existing.
-- terminate if any body part other than feet touches the ground
-- terminate if x-vel is significantly negative
-- terminate if the robot collides with itself.
-- terminate if all four feet leave the ground. 
-- add angular velocity and cartesian acceleration to observation
-
-
-Things that might be wrong with the code
-- are the limits of the observation space used for anything? How do I know the joint vel limit is 40? (plus maybe the 
-quaternion orientation limit is bad)
-- should my position observations also be normalized? (I don't think so)
-- make sure I pip install -e .
-- I halfed the euler angle for the episode to terminate from robot falling
-- Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
- if it is not touching the floor
- - I'm guessing on obs space limits on the last 6 items
- 
- Perhaps I should take the norm or sum of the foot contact forces. Do some investigation.
-
-
-JOINTS ARE GOING OUT OF BOUNDS AGAIN and its still not quite good. Why doen't it learn to just keep its feet under it? 
-
-Read papers
-
-Try a recurent policy
-
-Try bootstrapping with sine wave
-
-Make sure my plots are correct in save_video. I think the joints are just overshooting though. BUT CHECK JUST IN CASE.
-Also, do a run for much longer. Also visualize the sucessful runs so far. 
-
-PUt together some slides
-
-have a framework to automatically save videos to wandb.
-plot entropy
-Give a reward of -10 for termination, instead of giving a +1 for not terminating. Run this on my home machine.
-
-
-There seems to be some episodes getting suck at eps len == 1 again... Am I saving the trained models??
-Looks like its due to the no_feet_on_ground. Maybe relax this condition, need to have feet off for 10 timesteps?
-Nah, the algorithm seems to be able to avoid that.
- '''
-class AliengoEnv(gym.Env):
-    def __init__(self, render=False):
+class AliengoSteppingStones(gym.Env):
+    def __init__(self, render=False, realTime=False):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
         self.max_torque = 40.0 
         self.kp = 1.0 
         self.kd = 1.0
-        self.n_hold_frames = 1 #TODO change back to 4
+        self.n_hold_frames = 1 
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
-        self.trot_prior = True
-        self.action_coeff = 0.5 # This is maximum amplitude of actions added to trot gait. 1 is maximum range, 0 means
-        # all actions are multiplied by zero. 
 
-        self.period = 0.8 # of imitated gait, in seconds
-
-        # self.n_action_to_concat = 1 # this is the number of previous actions to concatenate to the state space.
+        self.height = 1.0 # height of the heightfield
+        self.course_length = 10.0 # total distance from edge of start block to edge of end block
+        self.course_width = 2.0 # widght of path of stepping stones
+        self.stone_length = 0.25 # side length of square stepping stones
+        self.stone_density = 6.0 # stones per square meter
+        self.stone_height_range = 0.25 # heights of stones will be within [self.height - this/2, self.height + this/2 ]
 
         if self._is_render:
             self.client = p.connect(p.GUI)
@@ -107,18 +41,12 @@ class AliengoEnv(gym.Env):
         # urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.client)
-        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-        #                             basePosition=[0,0,0.48], 
-        #                             baseOrientation=[0,0,0,1], 
-        #                             flags = urdfFlags, 
-        #                             useFixedBase=False,
-        #                             physicsClientId=self.client)
-        self.quadruped = aliengo.Aliengo(pybullet_client=self.client, max_torque=self.max_torque, kp=self.kp, kd=self.kd)
 
-        # # fixed base for debugging 
-        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-        #     basePosition=[0,0,2.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True, 
-        #       physicsClientId=self.client)
+        self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
+                                        max_torque=self.max_torque, 
+                                        kp=self.kp, 
+                                        kd=self.kd)
+
 
         p.setGravity(0,0,-9.8, physicsClientId=self.client)
         # self.quadruped.foot_links = [5, 9, 13, 17]
@@ -130,31 +58,23 @@ class AliengoEnv(gym.Env):
         #             # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0, physicsClientId=self.client)[12],p.getJointInfo(self.quadruped,l1, physicsClientId=self.client)[12], "enabled=",enableCollision)
         #             p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision, physicsClientId=self.client)
 
-        p.setRealTimeSimulation(0, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
+        p.setRealTimeSimulation(realTime, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
         # below is the default. Simulation params need to be retuned if this is changed
         p.setTimeStep(1/240., physicsClientId=self.client)
 
         # for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
         #     p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5, physicsClientId=self.client)
 
-        # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL
-        # self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
-        # self.quadruped.n_motors = 12
+
 
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.trot_prior)# * self.n_action_to_concat
+        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3  # TODO
         self.num_joints = 18 # This includes fixed joints from the URDF
-        self.action_space_dim = self.quadruped.n_motors
-        # self.action_ub = np.empty(self.action_space_dim)
-        # self.action_lb = np.empty(self.action_space_dim)
-        # self.action_mean = np.empty(self.action_space_dim)
-        # self.action_range = np.empty(self.action_space_dim)
-        # self.observation_ub = np.empty(self.state_space_dim)
-        # self.observation_lb = np.empty(self.state_space_dim)
+        self.action_space_dim = self.quadruped.n_motors # this remains unchanged
 
-        self.state = np.zeros(self.state_space_dim) 
-        self.applied_torques = np.zeros(self.quadruped.n_motors)
+        self.state = np.zeros(self.state_space_dim) # I currently don't distinguish between state and observation
+        self.applied_torques = np.zeros(self.quadruped.n_motors) 
         self.joint_velocities = np.zeros(self.quadruped.n_motors)
         self.joint_positions = np.zeros(self.quadruped.n_motors)
         self.base_orientation = np.zeros(4)
@@ -163,12 +83,8 @@ class AliengoEnv(gym.Env):
         self.base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
         self.previous_base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
-        # self.previous_lower_limb_vels = np.zeros(4 * 6)
-        # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.eps_step_counter = 0 # Used for triggering timeout
         self.t = 0 # represents the actual time
-        self.cycle_clock = 0 # cycle time for imitation learning a gait
-        # self.trot_loss_history = np.array([]) # return average trot_loss at end of episode
 
 
         self.reward = 0 # this is to store most recent reward
@@ -187,7 +103,7 @@ class AliengoEnv(gym.Env):
             )
 
 
-    def _is_non_foot_ground_contact(self):
+    def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
         """Detect if any parts of the robot, other than the feet, are touching the ground."""
 
         contact = False
@@ -200,7 +116,7 @@ class AliengoEnv(gym.Env):
         return contact
 
 
-    def _get_foot_contacts(self):
+    def _get_foot_contacts(self): #TODO change to stepping stone contact
         '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
 
         contacts = [0] * 4
@@ -224,44 +140,14 @@ class AliengoEnv(gym.Env):
         if (contacts > 10_000).any():
             warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
 
-        # begin code for debugging foot contacts
-        # debug = [0] * 4
-        # for i in range(len(self.quadruped.foot_links)):
-        #     info = p.getContactPoints(self.quadruped.quadruped, 
-        #                                 self.plane, 
-        #                                 linkIndexA=self.quadruped.foot_links[i],
-        #                                 physicsClientId=self.client)
-        #     if len(info) == 0: # leg does not contact ground
-        #         debug[i] = 0 
-        #     elif len(info) == 1: # leg has one contact with ground
-        #         debug[i] = info[0][9] # contact normal force
-        #     else: # use the contact point with the max normal force when there is more than one contact on a leg
-        #         normals = [info[i][9] for i in range(len(info))]
-        #         debug[i] = normals
-        #         # print('\nmultiple contacts' + '*' * 100 + '\n')
-        # debug = debug
         return contacts #, debug
 
 
     def step(self, action):
-        # action = np.clip(action, self.action_space.low, self.action_space.high)
         if not ((self.action_lb <= action) & (action <= self.action_ub)).all():
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
             
-        if self.trot_prior: 
-            action = action * self.action_coeff + self._trot()
-        else:
-            action = action
-
-        # p.setJointMotorControlArray(self.quadruped,
-        #     self.motor_joint_indices,
-        #     controlMode=p.POSITION_CONTROL,
-        #     targetPositions=_action,
-        #     forces=self.max_torque * np.ones(self.quadruped.n_motors),
-        #     positionGains=self.kp * np.ones(12),
-        #     velocityGains=self.kd * np.ones(12),
-        #     physicsClientId=self.client)
         self.quadruped.set_joint_position_targets(action)
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
@@ -293,21 +179,43 @@ class AliengoEnv(gym.Env):
             p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME, physicsClientId=self.client)
 
 
-    def reset(self): #TODO add stochasticity to the initial starting state
+    def reset(self): #TODO add stochasticity
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
         p.resetBasePositionAndOrientation(self.quadruped.quadruped,
-                                            posObj=[0,0,0.48], 
+                                            posObj=[0,0,self.height + 0.48], 
                                             ornObj=[0,0,0,1.0],
                                             physicsClientId=self.client) 
+
+        self._create_stepping_stones()
 
         self.quadruped.reset_joint_positions() # will put all joints at default starting positions
         for i in range(500): # to let the robot settle on the ground.
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
         return self.state
+    
+    def _create_stepping_stones(self):
+        start_block = p.createCollisionShape(p.GEOM_BOX, 
+                                            halfExtents=[1, self.course_width/2.0, self.height/2.0], 
+                                            physicsClientId=self.client)
+        stepping_stone = p.createCollisionShape(p.GEOM_BOX, 
+                                            halfExtents=[self.stone_length/2.0, self.stone_length/2.0, self.height/2.0], 
+                                            physicsClientId=self.client)
+        start_body = p.createMultiBody(baseCollisionShapeIndex=start_block, basePosition=[0,0,self.height/2.0])
+        end_body = p.createMultiBody(baseCollisionShapeIndex=start_block, basePosition=[self.course_length + 2.0,
+                                                                                    0,self.height/2.])
+        
+        n_stones = int(self.course_length * self.course_width * self.stone_density)
+        stone_heights = (np.random.rand(n_stones) - 0.5) * self.stone_height_range + self.height/2.0 
+        stone_x = np.random.rand(n_stones) * self.course_length + 1.0
+        stone_y = (np.random.rand(n_stones) - 0.5) * self.course_width
+        for i in range(n_stones):
+            p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
+                                basePosition=[stone_x[i], stone_y[i], stone_heights[i]])
+        
 
 
     def render(self, mode='human'):
@@ -386,13 +294,6 @@ class AliengoEnv(gym.Env):
         '''I belive this is required for an Open AI gym env.'''
         pass
 
-    # def _positions_to_actions(self, positions):
-    #     return (positions - self.action_mean) / (self.action_range * 0.5)
-  
-
-    # def _action_to_positions(self, actions):
-    #     return actions * (self.action_range * 0.5) + self.action_mean
-
 
     def _find_space_limits(self):
         ''' find upper and lower bounds of action and observation spaces''' 
@@ -415,9 +316,7 @@ class AliengoEnv(gym.Env):
                                         1e4 * np.ones(4), # arbitrary bound
                                         1e5 * np.ones(3),
                                         1e5 * np.ones(3)))
-        if self.trot_prior:
-            observation_lb = np.concatenate((observation_lb, np.zeros(1)))
-            observation_ub = np.concatenate((observation_ub, np.ones(1) * self.period))
+
 
         return observation_lb, observation_ub
             
@@ -476,7 +375,7 @@ class AliengoEnv(gym.Env):
         self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
 
         self.t = self.eps_step_counter * self.n_hold_frames / 240.
-        self.cycle_clock = self.t % self.period
+
 
         self.foot_normal_forces = self._get_foot_contacts()
 
@@ -488,8 +387,7 @@ class AliengoEnv(gym.Env):
                                     self.cartesian_base_accel,
                                     self.base_twist[3:])) # last item is base angular velocity
         
-        if self.trot_prior:
-            self.state = np.concatenate((self.state, np.array([self.cycle_clock])))
+
         if np.isnan(self.state).any():
             print('nans in state')
             breakpoint()
@@ -497,140 +395,11 @@ class AliengoEnv(gym.Env):
         # Not used in state, but used in _is_terminal() and _reward()    
         self.previous_base_twist = self.base_twist
     
-    
-    def _trot(self):
-        trot  = np.ones(12)
-        trot[[0,3,6,9]] = 0
-        trot[[1,10]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.25 + 0.25 # thighs
-        trot[[2,11]] = np.sin((np.pi * 2 / self.period * self.cycle_clock)) * 0.25 + 0.75 # calves
-        trot[[4,7]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.25 + 0.25 # thighs
-        trot[[5,8]]  = np.sin((np.pi * 2 / self.period * self.cycle_clock) + np.pi) * 0.25 + 0.75 # calves
-        return trot
-
 
 if __name__ == '__main__':
-    '''Perform check by feeding in the mocap trajectory provided by Unitree (linked) into the aliengo robot and
-    save video. https://github.com/unitreerobotics/aliengo_pybullet'''
-
-    import cv2
-    env = gym.make('gym_aliengo:Aliengo-v0')
-    env.trot_prior = False
-    # p.setPhysicsEngineParameter(contactERP=0.99)
-    # p.setPhysicsEngineParameter(frictionERP=0.99)
-    # p.setPhysicsEngineParameter(erp=0.99)
-    
+    env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
     env.reset()
-    img = env.render('rgb_array')
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    img_list = [img]
-    counter = 0
-
-    # for i in range(200):
-    #     p.stepSimulation(physicsClientId=env.client)
-    #     img = env.render('rgb_array')
-    #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    #     img_list.append(img)
-
-    # with open('mocap.txt','r') as f:
-    #     env.step(env._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32)))
-    # img = env.render('rgb_array')
-    # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    # img_list.append(img)
-    # for i in range(200):
-    #     p.stepSimulation(physicsClientId=env.client)
-    #     img = env.render('rgb_array')
-    #     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    #     img_list.append(img)
-        
-
-    '''    
-    with open('mocap.txt','r') as f:
-        for line_num, line in enumerate(f): 
-            # if line_num%(env.n_hold_frames * 2) == 0: # Unitree meant for this mocap to played at frequency of 500 Hz
-            if line_num%(4 * 2) == 0: # Unitree meant for this mocap to played at frequency of 500 Hz #TODO change 4 back to env.n_hold_frames
-
-                positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32)) #TODO move this back below and remove for loop
-                for _ in range(4):
-                    obs,_ , done, _ = env.step(positions)
-                    if counter%1 ==0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
-                        img = env.render('rgb_array')
-                        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                        img_list.append(img)
-                    counter +=1
-            if counter == 240*2e10: 
-                break
-
-        
-'''
-
-    # # check friction coefficients: 
-    # for i in env.quadruped.foot_links:
-    #     p.changeDynamics(env.quadruped.quadruped, i, spinningFriction=1.0, rollingFriction=1.0, 
-    #                     contactDamping=1000, contactStiffness=30000, frictionAnchor=True)
-    #     p.changeDynamics(env.quadruped.quadruped, i, spinningFriction=1.0, rollingFriction=1.0, 
-    #                     contactDamping=1000, contactStiffness=30000, frictionAnchor=True)
-    # p.changeDynamics(env.plane, -1, spinningFriction=1.0, rollingFriction=1.0, frictionAnchor=True)
-
-    # param_idx = [1, 6, 7, 8, 9]
-    # names = ['lateral_friction', 'rolling_friction ', 'spinning_friction', 'contact_damping', 'contact_stiffness']
-    # for j in range(len(param_idx)):
-    #     print('\n' + names[j])
-    #     for i in env.quadruped.foot_links:
-    #         print(p.getDynamicsInfo(env.quadruped.quadruped, i, env.client)[param_idx[j]])
-    #     print(p.getDynamicsInfo(env.plane, -1, env.client)[param_idx[j]])
-
-
-
-    
-    with open('mocap.txt','r') as f:
-        for line_num, line in enumerate(f): 
-            if line_num >= 240*3 + 240:
-                positions = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
-                obs,_ , done, _ = env.step(positions)
-                # for _ in range(3):
-
-                    # p.stepSimulation(physicsClientId=env.client)
-                if counter%3 == 0: # sim runs 240 Hz, want 60 Hz vid, but action repeat of 4 already gives us 60 hz   
-                    img = env.render('rgb_array')
-                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                    img_list.append(img)
-                counter +=1
-                # if line_num == 240*5: 
-                #     break
-
-    # for _ in range(400*4):
-    #     trot  = np.ones(12)
-    #     trot[[0,3,6,9]] = 0
-    #     trot[[1,10]] = np.sin((np.pi * 2 / env.period * counter/240.        )) * 0.25 + 0.25 # thighs
-    #     trot[[2,11]] = np.sin((np.pi * 2 / env.period * counter/240.        )) * 0.25 + 0.75 # calves
-    #     trot[[4,7]]  = np.sin((np.pi * 2 / env.period * counter/240.) + np.pi) * 0.25 + 0.25 # thighs
-    #     trot[[5,8]]  = np.sin((np.pi * 2 / env.period * counter/240.) + np.pi) * 0.25 + 0.75 # calves
-
-
-    #     _,_ , _, _ =  env.step(trot)
-    #     if counter%4 ==0: # sim runs 240 Hz, want 60 Hz vid   
-    #         img = env.render('rgb_array')
-    #         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    #         img_list.append(img)
-    #     counter +=1
-    #             # if counter ==100:
-    #             #     break
-
-    height, width, layers = img.shape
-    size = (width, height)
-    out = cv2.VideoWriter('test_vid.avi', cv2.VideoWriter_fourcc(*'XVID'), 60, size)
-
-    for img in img_list:
-        out.write(img)
-    out.release()
-    print('Video saved')
-
-
-    
-    
-
-
-
-    
+    while True:
+        time.sleep(1)
 
 

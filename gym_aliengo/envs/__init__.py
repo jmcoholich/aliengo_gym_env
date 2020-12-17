@@ -1,1 +1,2 @@
 from gym_aliengo.envs.aliengo_env import AliengoEnv
+from gym_aliengo.envs.aliengo_stepping_stones import AliengoSteppingStones

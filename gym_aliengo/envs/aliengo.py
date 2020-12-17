@@ -24,7 +24,7 @@ class Aliengo:
         self.n_motors = 12
         urdfFlags = p.URDF_USE_SELF_COLLISION
         self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-                                    basePosition=[0,0,0.48], 
+                                    basePosition=[0,0, 0.48], 
                                     baseOrientation=[0,0,0,1], 
                                     flags = urdfFlags, 
                                     useFixedBase=False,
@@ -34,9 +34,11 @@ class Aliengo:
 
         for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
             p.changeDynamics(self.quadruped, i, linearDamping=0, angularDamping=.5, physicsClientId=self.client)
-
+        
+        # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL. The skipped numbers are fixed joints
+        # in the URDF
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] 
-        # ^the other joints listed in the urdf are fixed joints 
+       
 
         self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
 
