@@ -7,7 +7,7 @@ import os
 import time
 import numpy as np
 import warnings
-from cv2 import putText, FONT_HERSHEY_SIMPLEX
+from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
 
 
@@ -42,7 +42,7 @@ class AliengoSteppingStones(gym.Env):
             self.client = p.connect(p.GUI)
         else:
             self.client = p.connect(p.DIRECT)
-        self.fake_client = p.connect(p.DIRECT) # this is only used for getting the heightmap
+        self.fake_client = p.connect(p.DIRECT) # this is only used for getting the heightmap #TODO change back to p.DIRECT
 
         if self.client == -1:
             raise RuntimeError('Pybullet could not connect to physics client')
@@ -50,6 +50,8 @@ class AliengoSteppingStones(gym.Env):
         # urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.client)
+        self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
+                                physicsClientId=self.fake_client)
 
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                         max_torque=self.max_torque, 
@@ -113,6 +115,7 @@ class AliengoSteppingStones(gym.Env):
 
         self._first_run = True # used so that I don't call _remove_stepping_stones on the first run
         self._stone_ids = []
+        self._fake_stone_ids = [] # this is for the self.fake_client simulation instance
 
 
     def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
@@ -214,38 +217,60 @@ class AliengoSteppingStones(gym.Env):
     
     
     def _remove_stepping_stones(self):
+        '''Removes the stepping stones in the fake_client and in the client'''
+    
         for id in self._stone_ids:
-            p.removeBody(id)
+            p.removeBody(id, physicsClientId=self.client)
         self._stone_ids = []
+
+        for id in self._fake_stone_ids:
+            p.removeBody(id, physicsClientId=self.fake_client)
+        self._fake_stone_ids = []
 
     
     def _create_stepping_stones(self):
-        start_block = p.createCollisionShape(p.GEOM_BOX, 
-                                            halfExtents=[1, self.course_width/2.0, self.height/2.0], 
-                                            physicsClientId=self.client)
-        stepping_stone = p.createCollisionShape(p.GEOM_BOX, 
-                                            halfExtents=[self.stone_length/2.0, self.stone_length/2.0, self.height/2.0], 
-                                            physicsClientId=self.client)
-        start_body = p.createMultiBody(baseCollisionShapeIndex=start_block, basePosition=[0,0,self.height/2.0])
-        end_body = p.createMultiBody(baseCollisionShapeIndex=start_block, basePosition=[self.course_length + 2.0,
-                                                                                    0,self.height/2.])
-        
+        '''Creates an identical set of stepping stones in client and fake_client.'''
+
+        # Randomly generate stone locations and heights 
         n_stones = int(self.course_length * self.course_width * self.stone_density)
         stone_heights = (np.random.rand(n_stones) - 0.5) * self.stone_height_range + self.height/2.0 
         stone_x = np.random.rand(n_stones) * self.course_length + 1.0
         stone_y = (np.random.rand(n_stones) - 0.5) * self.course_width
 
-        self._stone_ids = [start_body, end_body]
-        for i in range(n_stones):
-            id = p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
-                                    basePosition=[stone_x[i], stone_y[i], stone_heights[i]])
-            self._stone_ids.append(id)
+        for client in [self.client, self.fake_client]:
+            start_block = p.createCollisionShape(p.GEOM_BOX, 
+                                                halfExtents=[1, self.course_width/2.0, self.height/2.0], 
+                                                physicsClientId=client)
+            stepping_stone = p.createCollisionShape(p.GEOM_BOX, 
+                                                halfExtents=[self.stone_length/2.0, self.stone_length/2.0, self.height/2.0], 
+                                                physicsClientId=client)
+            start_body = p.createMultiBody(baseCollisionShapeIndex=start_block, 
+                                            basePosition=[0,0,self.height/2.0],
+                                            physicsClientId=client)
+            end_body = p.createMultiBody(baseCollisionShapeIndex=start_block, 
+                                            basePosition=[self.course_length + 2.0, 0, self.height/2.],
+                                            physicsClientId=client)
+            
+            if client == self.client:
+                self._stone_ids = [start_body, end_body]
+            else:
+                self._fake_stone_ids = [start_body, end_body]
+            for i in range(n_stones):
+                id = p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
+                                        basePosition=[stone_x[i], stone_y[i], stone_heights[i]],
+                                        physicsClientId=client)
+                if client == self.client:                      
+                    self._stone_ids.append(id)
+                else:
+                    self._fake_stone_ids.append(id)
 
     
     def _get_heightmap(self):
-        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation.'''
+        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
+        Uses the "fake_client" simulation instance in order to avoid robot collisions'''
 
         debug = False
+        show_xy = False
 
         base_x = self.base_position[0]
         base_y = self.base_position[1]
@@ -261,8 +286,7 @@ class AliengoSteppingStones(gym.Env):
         coor_list = coordinates.reshape((2, grid_len**2)).swapaxes(0, 1) # is now shape (grid_len*grid_len,2) 
         ray_start = np.append(coor_list, np.ones((grid_len**2, 1)) * (self.height + self.stone_height_range), axis=1)
         ray_end = np.append(coor_list, np.zeros((grid_len**2, 1)) - 1, axis=1)
-        raw_output = p.rayTestBatch(ray_start, ray_end, physicsClientId=self.client) #TODO I need the height map to ignore the actual robot
-        # it ignores the torso, but I also want it to ignore the legs and all. Just create another simulation instance
+        raw_output = p.rayTestBatch(ray_start, ray_end, physicsClientId=self.fake_client) 
         z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
         relative_z_heights = z_heights - base_z
         if debug:
@@ -271,8 +295,12 @@ class AliengoSteppingStones(gym.Env):
                         textColorRGB=[0,0,0])
             for i in range(grid_len):
                 for j in range(grid_len):
+                    if show_xy:
+                        text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j])
+                    else:
+                        text = '%.2f'%(z_heights.reshape((grid_len, grid_len))[i,j])
                     p.addUserDebugText(
-                        text='%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j]),
+                        text=text,
                         textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.height+1],
                         textColorRGB=[0,0,0]
                         )
@@ -283,14 +311,14 @@ class AliengoSteppingStones(gym.Env):
         return relative_z_heights.reshape((grid_len, grid_len))
         
 
-    def render(self, mode='human'):
+    def render(self, client, mode='human'):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
 
         RENDER_WIDTH = 480 
         RENDER_HEIGHT = 360
 
         base_x_velocity = np.array(p.getBaseVelocity(self.quadruped.quadruped, 
-                                    physicsClientId=self.client)).flatten()[0]
+                                    physicsClientId=client)).flatten()[0]
         torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
 
         # RENDER_WIDTH = 960 
@@ -304,24 +332,24 @@ class AliengoSteppingStones(gym.Env):
             # base_pos = self.minitaur.GetBasePosition()
             view_matrix = p.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=base_pos,
-                distance=2.0,
+                distance=2.0, #TODO change back to 2.0
                 yaw=0,
                 pitch=-30.,
                 roll=0,
                 upAxisIndex=2,
-                physicsClientId=self.client)
+                physicsClientId=client)
             proj_matrix = p.computeProjectionMatrixFOV(fov=60,
                 aspect=float(RENDER_WIDTH) /
                 RENDER_HEIGHT,
                 nearVal=0.1,
                 farVal=100.0,
-                physicsClientId=self.client)
+                physicsClientId=client)
             _, _, px, _, _ = p.getCameraImage(width=RENDER_WIDTH,
                 height=RENDER_HEIGHT,
                 viewMatrix=view_matrix,
                 projectionMatrix=proj_matrix,
                 renderer=p.ER_BULLET_HARDWARE_OPENGL,
-                physicsClientId=self.client)
+                physicsClientId=client)
             img = np.array(px)
             img = img[:, :, :3]
             img = putText(np.float32(img), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
@@ -391,46 +419,27 @@ class AliengoSteppingStones(gym.Env):
 
         base_x_velocity = self.base_twist[0]
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        finish_bonus = (self.base_position[0] >= self.course_length + 2) * 20 #TODO check this
+        finish_bonus = (self.base_position[0] >= self.course_length + 2) * 20 
         return base_x_velocity - 0.000005 * torque_penalty + finish_bonus
 
 
 
     def _is_state_terminal(self) -> bool:
-        ''' Calculates whether to end current episode due to failure based on current state.
-        Returns boolean and puts reason in info if True '''
-        info = {}
+        ''' Calculates whether to end current episode due to failure based on current state. '''
 
+        info = {}
+        fell = self.base_position[2] <= (self.height - self.stone_height_range/2.0)
+        reached_goal = (self.base_position[0] >= self.course_length + 2)
         timeout = (self.eps_step_counter >= self.eps_timeout)
 
-
-        base_z_position = self.base_position[2]
-        height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8)) 
-        body_contact = self._is_non_foot_ground_contact() * 0
-        # 0.78 rad is about 45 deg
-        falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78, 0.78]).any()) 
-        # falling = (abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > 0.78).any() 
-        going_backwards = (self.base_twist[0] <= -1.0) * 0
-        self_collision = self.quadruped.self_collision() * 0
-
-        no_feet_on_ground = (self.foot_normal_forces == 0).all() * 0
-        if falling:
-            info['termination_reason'] = 'falling'
-        elif height_out_of_bounds:
-            info['termination_reason'] = 'height_out_of_bounds'
-        elif body_contact:
-            info['termination_reason'] = 'body_contact_with_ground'
-        elif going_backwards:
-            info['termination_reason'] = 'going_backwards'
-        elif self_collision:
-            info['termination_reason'] = 'self_collision'
-        elif no_feet_on_ground:
-            info['termination_reason'] = 'no_feet_on_ground'
+        if fell:
+            info['termination_reason'] = 'fell'
+        elif reached_goal:
+            info['termination_reason'] = 'reached_goal'
         elif timeout: # {'TimeLimit.truncated': True}
             info['TimeLimit.truncated'] = True
 
-        return any([falling, height_out_of_bounds, body_contact, going_backwards, self_collision, no_feet_on_ground, \
-            timeout]), info
+        return any([fell, reached_goal, timeout]), info
 
 
     def _update_state(self):
@@ -462,12 +471,14 @@ class AliengoSteppingStones(gym.Env):
     
 
 if __name__ == '__main__':
-    env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
+    env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=False, realTime=True)
     env.reset()
-    time.sleep(5)
     env.reset()
-    # env._get_heightmap()
-    while True:
-        time.sleep(1)
+    env.reset()
+    imwrite('client_render.png', cvtColor(env.render(env.client, mode='rgb_array'), COLOR_RGB2BGR))
+    imwrite('fake_client_render.png', cvtColor(env.render(env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
+
+    # while True:
+    #     time.sleep(1)
 
 
