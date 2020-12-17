@@ -25,10 +25,10 @@ class AliengoSteppingStones(gym.Env):
 
         # stepping stone parameters
         self.height = 1.0 # height of the heightfield
-        self.course_length = 10.0 # total distance from edge of start block to edge of end block
-        self.course_width = 2.0 # widght of path of stepping stones
+        self.course_length = 10.0 # total distance from edge of start block to edge of end block 
+        self.course_width = 2.0 # widght of path of stepping stones 
         self.stone_length = 0.25 # side length of square stepping stones
-        self.stone_density = 6.0 # stones per square meter
+        self.stone_density = 6.0 # stones per square meter 
         self.stone_height_range = 0.25 # heights of stones will be within [self.height - this/2, self.height + this/2 ]
 
         # heightmap parameters
@@ -36,6 +36,7 @@ class AliengoSteppingStones(gym.Env):
         self.robot_position = 0.5 # distance of robot base origin from back edge of height map
         self.grid_spacing = 0.125 
         assert self.length%self.grid_spacing == 0
+        self.grid_len = int(self.length/self.grid_spacing) + 1
 
 
         if self._is_render:
@@ -50,7 +51,7 @@ class AliengoSteppingStones(gym.Env):
         # urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.client)
-        self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
+        _ = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.fake_client)
 
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
@@ -80,7 +81,7 @@ class AliengoSteppingStones(gym.Env):
 
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 + int(self.length/self.grid_spacing)  
+        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 + self.grid_len**2
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.quadruped.n_motors # this remains unchanged
 
@@ -122,6 +123,8 @@ class AliengoSteppingStones(gym.Env):
     def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
         """Detect if any parts of the robot, other than the feet, are touching the ground."""
 
+        raise NotImplementedError
+
         contact = False
         for i in range(self.num_joints):
             if i in self.quadruped.foot_links: # the feet themselves are allow the touch the ground
@@ -133,7 +136,9 @@ class AliengoSteppingStones(gym.Env):
 
 
     def _get_foot_contacts(self): 
-        '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
+        '''
+        Returns a numpy array of shape (4,) containing the normal forces on each foot with any object in simulation. 
+        '''
 
         contacts = [0] * 4
         for i in range(len(self.quadruped.foot_links)):
@@ -282,18 +287,18 @@ class AliengoSteppingStones(gym.Env):
         base_y = self.base_position[1]
         base_z = self.base_position[2]
 
-        grid_len = int(self.length/self.grid_spacing) + 1
-        x = np.linspace(0, self.length, grid_len)
-        y = np.linspace(-self.length/2.0, self.length/2.0, grid_len)
+
+        x = np.linspace(0, self.length, self.grid_len)
+        y = np.linspace(-self.length/2.0, self.length/2.0, self.grid_len)
         coordinates = np.array(np.meshgrid(x,y))
         coordinates[0,:,:] += base_x - self.robot_position
         coordinates[1,:,:] += base_y  
-        # coordinates has shape (2, grid_len, grid_len)
-        coor_list = coordinates.reshape((2, grid_len**2)).swapaxes(0, 1) # is now shape (grid_len*grid_len,2) 
-        ray_start = np.append(coor_list, np.ones((grid_len**2, 1)) * (self.height + self.stone_height_range), axis=1)
-        ray_end = np.append(coor_list, np.zeros((grid_len**2, 1)) - 1, axis=1)
+        # coordinates has shape (2, self.grid_len, self.grid_len)
+        coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
+        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * (self.height + self.stone_height_range), axis=1)
+        ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
         raw_output = p.rayTestBatch(ray_start, ray_end, physicsClientId=self.fake_client) 
-        z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
+        z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
         relative_z_heights = z_heights - base_z
 
         if debug:
@@ -303,12 +308,12 @@ class AliengoSteppingStones(gym.Env):
             #             textColorRGB=[0,0,0],
             #             physicsClientId=self.client)
             # self._debug_ids.append(_id)
-            for i in range(grid_len):
-                for j in range(grid_len):
+            for i in range(self.grid_len):
+                for j in range(self.grid_len):
                     if show_xy:
-                        text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j])
+                        text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((self.grid_len, self.grid_len))[i,j])
                     else:
-                        text = '%.2f'%(z_heights.reshape((grid_len, grid_len))[i,j])
+                        text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
                     _id = p.addUserDebugText(text=text,
                                             textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.height+0.5],
                                             textColorRGB=[0,0,0],
@@ -320,11 +325,14 @@ class AliengoSteppingStones(gym.Env):
                                             physicsClientId=self.client )
                     self._debug_ids.append(_id)
         
-        return relative_z_heights.reshape((grid_len, grid_len))
+        return relative_z_heights.reshape((self.grid_len, self.grid_len))
         
 
-    def render(self, client, mode='human'):
+    def render(self, client=None, mode='human'):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
+
+        if client == None: # for some reason I can't use self.client as a default value in the function definition line.
+            client = self.client 
 
         RENDER_WIDTH = 480 
         RENDER_HEIGHT = 360
@@ -381,10 +389,10 @@ class AliengoSteppingStones(gym.Env):
                             ('Foot %d contacts: ' %(i+1)) + str(num), 
                             (200, 60 + 20 * i), 
                             FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            img = putText(np.float32(img), 
-                            'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
-                            (200, 60 + 20 * 4), 
-                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            # img = putText(np.float32(img), 
+            #                 'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
+            #                 (200, 60 + 20 * 4), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             img = putText(np.float32(img), 
                             'Self Collision: ' + str(self.quadruped.self_collision()), 
                             (200, 60 + 20 * 5), 
@@ -412,7 +420,8 @@ class AliengoSteppingStones(gym.Env):
                                         -0.78 * np.ones(4), # this is for base orientation in quaternions
                                         np.zeros(4), # foot normal forces
                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
-                                        -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
+                                        -1e5 * np.ones(3), # angular velocity (arbitrary bound)
+                                        -np.ones(self.grid_len**2) * (self.height + self.stone_height_range/2.0 + 5))) # 5 is a safe arbitrary value 
 
         observation_ub = np.concatenate((torque_ub, 
                                         position_ub, 
@@ -420,7 +429,8 @@ class AliengoSteppingStones(gym.Env):
                                         0.78 * np.ones(4),
                                         1e4 * np.ones(4), # arbitrary bound
                                         1e5 * np.ones(3),
-                                        1e5 * np.ones(3)))
+                                        1e5 * np.ones(3),
+                                        np.ones(self.grid_len**2) * (self.height + self.stone_height_range/2.0 + 5)))
 
 
         return observation_lb, observation_ub
@@ -471,8 +481,8 @@ class AliengoSteppingStones(gym.Env):
                                     self.base_orientation,
                                     self.foot_normal_forces,
                                     self.cartesian_base_accel,
-                                    self.base_twist[3:],
-                                    self._get_heightmap().flatten())) # last item is base angular velocity
+                                    self.base_twist[3:], # base angular velocity
+                                    self._get_heightmap().flatten())) 
         
         if np.isnan(self.state).any():
             print('nans in state')
