@@ -23,6 +23,7 @@ class AliengoSteppingStones(gym.Env):
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
 
+        # stepping stone parameters
         self.height = 1.0 # height of the heightfield
         self.course_length = 10.0 # total distance from edge of start block to edge of end block
         self.course_width = 2.0 # widght of path of stepping stones
@@ -30,10 +31,18 @@ class AliengoSteppingStones(gym.Env):
         self.stone_density = 6.0 # stones per square meter
         self.stone_height_range = 0.25 # heights of stones will be within [self.height - this/2, self.height + this/2 ]
 
+        # heightmap parameters
+        self.length = 1.25# assumes square
+        self.robot_position = 0.5 # distance of robot base origin from back edge of height map
+        self.grid_spacing = 0.125 
+        assert self.length%self.grid_spacing == 0
+
+
         if self._is_render:
             self.client = p.connect(p.GUI)
         else:
             self.client = p.connect(p.DIRECT)
+        self.fake_client = p.connect(p.DIRECT) # this is only used for getting the heightmap
 
         if self.client == -1:
             raise RuntimeError('Pybullet could not connect to physics client')
@@ -69,7 +78,7 @@ class AliengoSteppingStones(gym.Env):
 
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3  # TODO
+        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 + int(self.length/self.grid_spacing)  
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.quadruped.n_motors # this remains unchanged
 
@@ -116,13 +125,12 @@ class AliengoSteppingStones(gym.Env):
         return contact
 
 
-    def _get_foot_contacts(self): #TODO change to stepping stone contact
+    def _get_foot_contacts(self): 
         '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
 
         contacts = [0] * 4
         for i in range(len(self.quadruped.foot_links)):
-            info = p.getContactPoints(self.quadruped.quadruped, 
-                                        self.plane, 
+            info = p.getContactPoints(bodyA=self.quadruped.quadruped,  
                                         linkIndexA=self.quadruped.foot_links[i],
                                         physicsClientId=self.client)
             if len(info) == 0: # leg does not contact ground
@@ -140,7 +148,7 @@ class AliengoSteppingStones(gym.Env):
         if (contacts > 10_000).any():
             warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
 
-        return contacts #, debug
+        return contacts 
 
 
     def step(self, action):
@@ -215,8 +223,48 @@ class AliengoSteppingStones(gym.Env):
         for i in range(n_stones):
             p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
                                 basePosition=[stone_x[i], stone_y[i], stone_heights[i]])
-        
 
+    
+    def _get_heightmap(self):
+        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation.'''
+
+        debug = False
+
+        base_x = self.base_position[0]
+        base_y = self.base_position[1]
+        base_z = self.base_position[2]
+
+        grid_len = int(self.length/self.grid_spacing) + 1
+        x = np.linspace(0, self.length, grid_len)
+        y = np.linspace(-self.length/2.0, self.length/2.0, grid_len)
+        coordinates = np.array(np.meshgrid(x,y))
+        coordinates[0,:,:] += base_x - self.robot_position
+        coordinates[1,:,:] += base_y  
+        # coordinates has shape (2, grid_len, grid_len)
+        coor_list = coordinates.reshape((2, grid_len**2)).swapaxes(0, 1) # is now shape (grid_len*grid_len,2) 
+        ray_start = np.append(coor_list, np.ones((grid_len**2, 1)) * (self.height + self.stone_height_range), axis=1)
+        ray_end = np.append(coor_list, np.zeros((grid_len**2, 1)) - 1, axis=1)
+        raw_output = p.rayTestBatch(ray_start, ray_end, physicsClientId=self.client) #TODO I need the height map to ignore the actual robot
+        # it ignores the torso, but I also want it to ignore the legs and all. Just create another simulation instance
+        z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
+        relative_z_heights = z_heights - base_z
+        if debug:
+            p.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
+                        textPosition=[base_x, base_y,self.height+1],
+                        textColorRGB=[0,0,0])
+            for i in range(grid_len):
+                for j in range(grid_len):
+                    p.addUserDebugText(
+                        text='%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j]),
+                        textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.height+1],
+                        textColorRGB=[0,0,0]
+                        )
+                    p.addUserDebugLine( [coordinates[0,i,j], coordinates[1,i,j],self.height+1],
+                                        [coordinates[0,i,j], coordinates[1,i,j], 0],
+                                        lineColorRGB=[0,0,0] )
+        
+        return relative_z_heights.reshape((grid_len, grid_len))
+        
 
     def render(self, mode='human'):
         '''Setting the render kwarg in the constructor determines if the env will render or not.'''
@@ -378,14 +426,15 @@ class AliengoSteppingStones(gym.Env):
 
 
         self.foot_normal_forces = self._get_foot_contacts()
-
+        
         self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
                                     self.joint_velocities,
                                     self.base_orientation,
                                     self.foot_normal_forces,
                                     self.cartesian_base_accel,
-                                    self.base_twist[3:])) # last item is base angular velocity
+                                    self.base_twist[3:],
+                                    self._get_heightmap().flatten())) # last item is base angular velocity
         
 
         if np.isnan(self.state).any():
@@ -399,6 +448,8 @@ class AliengoSteppingStones(gym.Env):
 if __name__ == '__main__':
     env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
     env.reset()
+    print(p.getBodyUniqueId())
+    env._get_heightmap()
     while True:
         time.sleep(1)
 
