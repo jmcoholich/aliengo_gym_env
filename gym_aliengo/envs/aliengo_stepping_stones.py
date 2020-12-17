@@ -32,7 +32,7 @@ class AliengoSteppingStones(gym.Env):
         self.stone_height_range = 0.25 # heights of stones will be within [self.height - this/2, self.height + this/2 ]
 
         # heightmap parameters
-        self.length = 1.25# assumes square
+        self.length = 1.25 # assumes square 
         self.robot_position = 0.5 # distance of robot base origin from back edge of height map
         self.grid_spacing = 0.125 
         assert self.length%self.grid_spacing == 0
@@ -42,7 +42,7 @@ class AliengoSteppingStones(gym.Env):
             self.client = p.connect(p.GUI)
         else:
             self.client = p.connect(p.DIRECT)
-        self.fake_client = p.connect(p.DIRECT) # this is only used for getting the heightmap #TODO change back to p.DIRECT
+        self.fake_client = p.connect(p.DIRECT) # this is only used for getting the heightmap 
 
         if self.client == -1:
             raise RuntimeError('Pybullet could not connect to physics client')
@@ -116,6 +116,7 @@ class AliengoSteppingStones(gym.Env):
         self._first_run = True # used so that I don't call _remove_stepping_stones on the first run
         self._stone_ids = []
         self._fake_stone_ids = [] # this is for the self.fake_client simulation instance
+        self._debug_ids = []
 
 
     def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
@@ -219,12 +220,12 @@ class AliengoSteppingStones(gym.Env):
     def _remove_stepping_stones(self):
         '''Removes the stepping stones in the fake_client and in the client'''
     
-        for id in self._stone_ids:
-            p.removeBody(id, physicsClientId=self.client)
+        for _id in self._stone_ids:
+            p.removeBody(_id, physicsClientId=self.client)
         self._stone_ids = []
 
-        for id in self._fake_stone_ids:
-            p.removeBody(id, physicsClientId=self.fake_client)
+        for _id in self._fake_stone_ids:
+            p.removeBody(_id, physicsClientId=self.fake_client)
         self._fake_stone_ids = []
 
     
@@ -256,13 +257,13 @@ class AliengoSteppingStones(gym.Env):
             else:
                 self._fake_stone_ids = [start_body, end_body]
             for i in range(n_stones):
-                id = p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
+                _id = p.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
                                         basePosition=[stone_x[i], stone_y[i], stone_heights[i]],
                                         physicsClientId=client)
                 if client == self.client:                      
-                    self._stone_ids.append(id)
+                    self._stone_ids.append(_id)
                 else:
-                    self._fake_stone_ids.append(id)
+                    self._fake_stone_ids.append(_id)
 
     
     def _get_heightmap(self):
@@ -271,6 +272,11 @@ class AliengoSteppingStones(gym.Env):
 
         debug = False
         show_xy = False
+
+        if self._debug_ids != []: # remove the exiting debug items
+            for _id in self._debug_ids:
+                p.removeUserDebugItem(_id, physicsClientId=self.client)
+            self._debug_ids = []
 
         base_x = self.base_position[0]
         base_y = self.base_position[1]
@@ -289,24 +295,30 @@ class AliengoSteppingStones(gym.Env):
         raw_output = p.rayTestBatch(ray_start, ray_end, physicsClientId=self.fake_client) 
         z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
         relative_z_heights = z_heights - base_z
+
         if debug:
-            p.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
-                        textPosition=[base_x, base_y,self.height+1],
-                        textColorRGB=[0,0,0])
+            # #print xy coordinates of robot origin 
+            # _id = p.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
+            #             textPosition=[base_x, base_y,self.height+1],
+            #             textColorRGB=[0,0,0],
+            #             physicsClientId=self.client)
+            # self._debug_ids.append(_id)
             for i in range(grid_len):
                 for j in range(grid_len):
                     if show_xy:
                         text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j])
                     else:
                         text = '%.2f'%(z_heights.reshape((grid_len, grid_len))[i,j])
-                    p.addUserDebugText(
-                        text=text,
-                        textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.height+1],
-                        textColorRGB=[0,0,0]
-                        )
-                    p.addUserDebugLine( [coordinates[0,i,j], coordinates[1,i,j],self.height+1],
-                                        [coordinates[0,i,j], coordinates[1,i,j], 0],
-                                        lineColorRGB=[0,0,0] )
+                    _id = p.addUserDebugText(text=text,
+                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.height+0.5],
+                                            textColorRGB=[0,0,0],
+                                            physicsClientId=self.client)
+                    self._debug_ids.append(_id)
+                    _id = p.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.height+0.5],
+                                            [coordinates[0,i,j], coordinates[1,i,j], 0],
+                                            lineColorRGB=[0,0,0],
+                                            physicsClientId=self.client )
+                    self._debug_ids.append(_id)
         
         return relative_z_heights.reshape((grid_len, grid_len))
         
@@ -332,7 +344,7 @@ class AliengoSteppingStones(gym.Env):
             # base_pos = self.minitaur.GetBasePosition()
             view_matrix = p.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=base_pos,
-                distance=2.0, #TODO change back to 2.0
+                distance=2.0, 
                 yaw=0,
                 pitch=-30.,
                 roll=0,
@@ -471,14 +483,17 @@ class AliengoSteppingStones(gym.Env):
     
 
 if __name__ == '__main__':
-    env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=False, realTime=True)
-    env.reset()
+    '''This test open the simulation in GUI mode for viewing the generated terrain, then saves a rendered image of each
+    client for visual verification that the two are identical. There are two resets to ensure that the deletion and 
+    addition of terrain elements is working properly. '''
+
+    env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
     env.reset()
     env.reset()
     imwrite('client_render.png', cvtColor(env.render(env.client, mode='rgb_array'), COLOR_RGB2BGR))
     imwrite('fake_client_render.png', cvtColor(env.render(env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
 
-    # while True:
-    #     time.sleep(1)
+    while True:
+        time.sleep(1)
 
 
