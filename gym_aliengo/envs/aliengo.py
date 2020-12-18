@@ -22,8 +22,23 @@ class Aliengo:
         self.client = pybullet_client
         self.max_torque = max_torque
         self.n_motors = 12
+
+        self.foot_links = [5, 9, 13, 17]
+        self.quadruped = self.load_urdf()
+
+    
+        
+        # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL. The skipped numbers are fixed joints
+        # in the URDF
+        self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] 
+       
+
+        self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
+
+
+    def load_urdf(self):
         urdfFlags = p.URDF_USE_SELF_COLLISION
-        self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+        quadruped= p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
                                     basePosition=[0,0, 0.48], 
                                     baseOrientation=[0,0,0,1], 
                                     flags = urdfFlags, 
@@ -32,15 +47,14 @@ class Aliengo:
 
         self.foot_links = [5, 9, 13, 17]
 
-        for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
-            p.changeDynamics(self.quadruped, i, linearDamping=0, angularDamping=.5, physicsClientId=self.client)
+        for i in range (p.getNumJoints(quadruped, physicsClientId=self.client)):
+            p.changeDynamics(quadruped, i, linearDamping=0, angularDamping=.5, physicsClientId=self.client)
         
-        # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL. The skipped numbers are fixed joints
-        # in the URDF
-        self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] 
-       
+        return quadruped
 
-        self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
+    def remove_body(self):
+        p.removeBody(self.quadruped, physicsClientId=self.client)
+        
 
 
 

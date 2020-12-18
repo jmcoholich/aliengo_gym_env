@@ -10,7 +10,10 @@ import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
 
-
+'''
+TODO
+- log distance traveled
+'''
 class AliengoSteppingStones(gym.Env):
     def __init__(self, render=False, realTime=False):
         # Environment Options
@@ -22,10 +25,11 @@ class AliengoSteppingStones(gym.Env):
         self.n_hold_frames = 1 
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
+        self.realTime = realTime
 
         # stepping stone parameters
         self.height = 1.0 # height of the heightfield
-        self.course_length = 10.0 # total distance from edge of start block to edge of end block 
+        self.course_length = 10.0 # total distance from edge of start block to edge of end block TODO 10.0
         self.course_width = 2.0 # widght of path of stepping stones 
         self.stone_length = 0.25 # side length of square stepping stones
         self.stone_density = 6.0 # stones per square meter 
@@ -45,20 +49,32 @@ class AliengoSteppingStones(gym.Env):
             self.client = p.connect(p.DIRECT)
         self.fake_client = p.connect(p.DIRECT) # this is only used for getting the heightmap 
 
-        if self.client == -1:
+
+        if (self.client == -1) or (self.fake_client == -1):
             raise RuntimeError('Pybullet could not connect to physics client')
+
+        # p.setPhysicsEngineParameter(enableFileCaching=1, physicsClientId=self.client)
+        # p.setPhysicsEngineParameter(enableFileCaching=1, physicsClientId=self.fake_client)
 
         # urdfFlags = p.URDF_USE_SELF_COLLISION
         self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.client)
-        _ = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
+        self.fake_plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
                                 physicsClientId=self.fake_client)
 
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                         max_torque=self.max_torque, 
                                         kp=self.kp, 
                                         kd=self.kd)
+                                        
 
+        # urdfFlags = p.URDF_USE_SELF_COLLISION
+        # self.test_quadruped= p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+        #                             basePosition=[0,0, 0.48], 
+        #                             baseOrientation=[0,0,0,1], 
+        #                             flags = urdfFlags, 
+        #                             useFixedBase=False,
+        #                             physicsClientId=self.client)
 
         p.setGravity(0,0,-9.8, physicsClientId=self.client)
         # self.quadruped.foot_links = [5, 9, 13, 17]
@@ -70,7 +86,7 @@ class AliengoSteppingStones(gym.Env):
         #             # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0, physicsClientId=self.client)[12],p.getJointInfo(self.quadruped,l1, physicsClientId=self.client)[12], "enabled=",enableCollision)
         #             p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision, physicsClientId=self.client)
 
-        p.setRealTimeSimulation(realTime, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
+        p.setRealTimeSimulation(self.realTime, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
         # below is the default. Simulation params need to be retuned if this is changed
         p.setTimeStep(1/240., physicsClientId=self.client)
 
@@ -206,10 +222,35 @@ class AliengoSteppingStones(gym.Env):
 
         if not self._first_run:
             self._remove_stepping_stones()
+            # p.removeBody(self.test_quadruped, physicsClientId=self.client)
+            # self.quadruped.remove_body()
+            # p.removeBody(self.plane, physicsClientId=self.client)
+            # p.removeBody(self.plane, physicsClientId=self.fake_client)
+            print('called reset' + '*' * 40)
+            p.resetSimulation(self.client)
+            p.resetSimulation(self.fake_client) 
+            p.setGravity(0,0,-9.8, physicsClientId=self.client)
+            p.setRealTimeSimulation(self.realTime, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
+            p.setTimeStep(1/240., physicsClientId=self.client)
+            
+            # self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
+            #                         physicsClientId=self.client)
+            # self.fake_plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
+            #                         physicsClientId=self.fake_client)
+            # self.quadruped.load_urdf() 
+            # urdfFlags = p.URDF_USE_SELF_COLLISION
+            # self.test_quadruped= p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+            #                         basePosition=[0,0, 0.48], 
+            #                         baseOrientation=[0,0,0,1], 
+            #                         flags = urdfFlags, 
+            #                         useFixedBase=False,
+            #                         physicsClientId=self.client)
+            
         else:
             self._first_run = False
-        self._create_stepping_stones()
 
+        self._create_stepping_stones()
+        '''
         p.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,self.height + 0.48], 
                                             ornObj=[0,0,0,1.0],
@@ -219,12 +260,13 @@ class AliengoSteppingStones(gym.Env):
         for i in range(500): # to let the robot settle on the ground.
             p.stepSimulation(physicsClientId=self.client)
         self._update_state()
+        
         return self.state
-    
+        '''
     
     def _remove_stepping_stones(self):
         '''Removes the stepping stones in the fake_client and in the client'''
-    
+
         for _id in self._stone_ids:
             p.removeBody(_id, physicsClientId=self.client)
         self._stone_ids = []
@@ -233,7 +275,7 @@ class AliengoSteppingStones(gym.Env):
             p.removeBody(_id, physicsClientId=self.fake_client)
         self._fake_stone_ids = []
 
-    
+
     def _create_stepping_stones(self):
         '''Creates an identical set of stepping stones in client and fake_client.'''
 
@@ -450,6 +492,7 @@ class AliengoSteppingStones(gym.Env):
         ''' Calculates whether to end current episode due to failure based on current state. '''
 
         info = {}
+
         fell = self.base_position[2] <= (self.height - self.stone_height_range/2.0)
         reached_goal = (self.base_position[0] >= self.course_length + 2)
         timeout = (self.eps_step_counter >= self.eps_timeout)
@@ -500,6 +543,17 @@ if __name__ == '__main__':
     '''This test open the simulation in GUI mode for viewing the generated terrain, then saves a rendered image of each
     client for visual verification that the two are identical. There are two resets to ensure that the deletion and 
     addition of terrain elements is working properly. '''
+    import pybullet_envs
+    # env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=False, realTime=False)
+    env = gym.make('MinitaurBulletEnv-v0')
+    for _ in range(1000):
+        # env._create_stepping_stones()
+        # env._remove_stepping_stones()
+        # p.resetSimulation(env.client)
+        # p.resetSimulation(env.fake_client)
+        env.reset()
+    sys.exit()
+
 
     env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
     env.reset()
