@@ -55,9 +55,7 @@ class AliengoSteppingStones(gym.Env):
             raise RuntimeError('Pybullet could not connect to physics client')
 
 
-        
-
-
+    
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
         self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 + self.grid_len**2
@@ -77,7 +75,7 @@ class AliengoSteppingStones(gym.Env):
         self.eps_step_counter = 0 # Used for triggering timeout
         self.t = 0 # represents the actual time
         self._debug_ids = []
-        
+
         self.reset()
 
         self.reward = 0 # this is to store most recent reward
