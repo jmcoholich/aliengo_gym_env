@@ -38,22 +38,31 @@ class Aliengo:
 
     def load_urdf(self):
         urdfFlags = p.URDF_USE_SELF_COLLISION
-        quadruped= p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+        quadruped= self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
                                     basePosition=[0,0, 0.48], 
                                     baseOrientation=[0,0,0,1], 
                                     flags = urdfFlags, 
-                                    useFixedBase=False,
-                                    physicsClientId=self.client)
+                                    useFixedBase=False)
 
         self.foot_links = [5, 9, 13, 17]
 
-        for i in range (p.getNumJoints(quadruped, physicsClientId=self.client)):
-            p.changeDynamics(quadruped, i, linearDamping=0, angularDamping=.5, physicsClientId=self.client)
+        for i in range (self.client.getNumJoints(quadruped)):
+            self.client.changeDynamics(quadruped, i, linearDamping=0, angularDamping=.5)
+
+        
+        # self.quadruped.foot_links = [5, 9, 13, 17]
+        # self.lower_legs = [2,5,8,11]
+        # for l0 in self.lower_legs:
+        #     for l1 in self.lower_legs:
+        #         if (l1>l0):
+        #             enableCollision = 1
+        #             # print("collision for pair",l0,l1, self.client.getJointInfo(self.quadruped,l0, physicsClientId=self.client)[12],p.getJointInfo(self.quadruped,l1, physicsClientId=self.client)[12], "enabled=",enableCollision)
+        #             self.client.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision, physicsClientId=self.client)
         
         return quadruped
 
     def remove_body(self):
-        p.removeBody(self.quadruped, physicsClientId=self.client)
+        self.client.removeBody(self.quadruped)
         
 
 
@@ -61,7 +70,7 @@ class Aliengo:
     def self_collision(self):
         '''Returns true if any of the robot links are colliding with any other link'''
 
-        points = p.getContactPoints(self.quadruped, self.quadruped, physicsClientId=self.client)
+        points = self.client.getContactPoints(self.quadruped, self.quadruped)
         return len(points) > 0
 
     def set_joint_position_targets(self, positions):
@@ -75,14 +84,13 @@ class Aliengo:
  
         positions = self._actions_to_positions(positions)
 
-        p.setJointMotorControlArray(self.quadruped,
+        self.client.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
             targetPositions=positions,
             forces=self.max_torque * np.ones(self.n_motors),
             positionGains=self.kp * np.ones(self.n_motors),
-            velocityGains=self.kd * np.ones(self.n_motors),
-            physicsClientId=self.client)
+            velocityGains=self.kd * np.ones(self.n_motors))
 
 
     def _positions_to_actions(self, positions):
@@ -105,7 +113,7 @@ class Aliengo:
         positions_ub = np.zeros(self.n_motors)
         # find bounds of action space 
         for i in range(self.n_motors): 
-            joint_info = p.getJointInfo(self.quadruped, self.motor_joint_indices[i], physicsClientId=self.client)
+            joint_info = self.client.getJointInfo(self.quadruped, self.motor_joint_indices[i])
             # bounds on joint position
             positions_lb[i] = joint_info[8]
             positions_ub[i] = joint_info[9]
@@ -148,7 +156,7 @@ class Aliengo:
     def get_joint_states(self):
         '''Note: Reaction forces will return all zeros unless a torque sensor has been set'''
 
-        joint_states = p.getJointStates(self.quadruped, self.motor_joint_indices, physicsClientId=self.client)
+        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
         joint_positions  = self._positions_to_actions(np.array([joint_states[i][0] for i in range(self.n_motors)]))
         joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
         reaction_forces  = np.array([joint_states[i][2] for i in range(self.n_motors)])
@@ -157,12 +165,12 @@ class Aliengo:
 
 
     def get_base_position_and_orientation(self):
-        base_position, base_orientation = p.getBasePositionAndOrientation(self.quadruped, physicsClientId=self.client)    
+        base_position, base_orientation = self.client.getBasePositionAndOrientation(self.quadruped)    
         return np.array(base_position), np.array(base_orientation)
     
     
     def get_base_twist(self):
-        return np.array(p.getBaseVelocity(self.quadruped, physicsClientId=self.client)).flatten()
+        return np.array(self.client.getBaseVelocity(self.quadruped)).flatten()
 
         
     def reset_joint_positions(self, positions=None):
@@ -176,23 +184,21 @@ class Aliengo:
                             -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
 
         for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
-            p.resetJointState(self.quadruped, 
+            self.client.resetJointState(self.quadruped, 
                                 self.motor_joint_indices[i],
                                 positions[i],
-                                targetVelocity=0,
-                                physicsClientId=self.client)
+                                targetVelocity=0)
 
         ''' TODO: see if the following is actually necessary. i.e. does pybullet retain motor control targets after you 
          Reset joint positions? If so, the following is necessary'''
 
-        p.setJointMotorControlArray(self.quadruped,
+        self.client.setJointMotorControlArray(self.quadruped,
                                     self.motor_joint_indices,
                                     controlMode=p.POSITION_CONTROL,
                                     targetPositions=positions,
                                     forces=self.max_torque * np.ones(self.n_motors),
                                     positionGains=self.kp * np.ones(12),
-                                    velocityGains=self.kd * np.ones(12),
-                                    physicsClientId=self.client)
+                                    velocityGains=self.kd * np.ones(12))
 
 
 
