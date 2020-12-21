@@ -9,74 +9,13 @@ import numpy as np
 import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX
 from gym_aliengo.envs import aliengo
-
-'''Agent can be trained with PPO algorithm from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail. Run:
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits
-
-default params with 10x samples:
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2048 --num-processes 10 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 10 --num-mini-batch 32 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10000000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/test4 --seed 4
-
- python main.py --env-name "gym_aliengo:aliengo-v0" --algo ppo --use-gae --log-interval 1 --num-steps 2000 --num-processes 1 --lr 3e-4 --entropy-coef 0 --value-loss-coef 0.5 --ppo-epoch 20 --num-mini-batch 4 --gamma 0.99 --gae-lambda 0.95 --num-env-steps 10_000_000 --use-linear-lr-decay=True --use-proper-time-limits --save-dir ./trained_models/new4 --seed 4
+from pybullet_utils import bullet_client as bc
 
 
-Things to try
-- plot entropy (I know the PPO kostrikov is logging lots of stuff), and plot other stuff too. Try wandb for this. Also use tmux lol.
-- higher penalty on torques
+'''A basic, flat-ground implementation of Aliengo for learning to walk. Only rewards forward motion with a small penalty
+for joint torques. '''
 
 
-Things I have tried
-- get simulation GUI on my laptop and probe it so I know pm 1 produces desired range of motion 
-- hyperparam sweep
-- normalize action space to fall within pm 1
-- changing max torque available 
-- making sure my changes to avoid jumping on startup were realized (pip install -e .)
-- printing reward function to video
-- letting train longer
-- made sure its not always using max force
-- fixed issue where I didn't specify the PhysicsclientID
-- Add a reward just for existing.
-- terminate if any body part other than feet touches the ground
-- terminate if x-vel is significantly negative
-- terminate if the robot collides with itself.
-- terminate if all four feet leave the ground. 
-- add angular velocity and cartesian acceleration to observation
-
-
-Things that might be wrong with the code
-- are the limits of the observation space used for anything? How do I know the joint vel limit is 40? (plus maybe the 
-quaternion orientation limit is bad)
-- should my position observations also be normalized? (I don't think so)
-- make sure I pip install -e .
-- I halfed the euler angle for the episode to terminate from robot falling
-- Perhaps I need to add base velocity to the code? I don't think the policy net can calculate translational velocity
- if it is not touching the floor
- - I'm guessing on obs space limits on the last 6 items
- 
- Perhaps I should take the norm or sum of the foot contact forces. Do some investigation.
-
-
-JOINTS ARE GOING OUT OF BOUNDS AGAIN and its still not quite good. Why doen't it learn to just keep its feet under it? 
-
-Read papers
-
-Try a recurent policy
-
-Try bootstrapping with sine wave
-
-Make sure my plots are correct in save_video. I think the joints are just overshooting though. BUT CHECK JUST IN CASE.
-Also, do a run for much longer. Also visualize the sucessful runs so far. 
-
-PUt together some slides
-
-have a framework to automatically save videos to wandb.
-plot entropy
-Give a reward of -10 for termination, instead of giving a +1 for not terminating. Run this on my home machine.
-
-
-There seems to be some episodes getting suck at eps len == 1 again... Am I saving the trained models??
-Looks like its due to the no_feet_on_ground. Maybe relax this condition, need to have feet off for 10 timesteps?
-Nah, the algorithm seems to be able to avoid that.
- '''
 class AliengoEnv(gym.Env):
     def __init__(self, render=False):
         # Environment Options
@@ -88,70 +27,30 @@ class AliengoEnv(gym.Env):
         self.n_hold_frames = 1 #TODO change back to 4
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
-        self.trot_prior = True
-        self.action_coeff = 0.5 # This is maximum amplitude of actions added to trot gait. 1 is maximum range, 0 means
-        # all actions are multiplied by zero. 
 
-        self.period = 0.8 # of imitated gait, in seconds
-
-        # self.n_action_to_concat = 1 # this is the number of previous actions to concatenate to the state space.
 
         if self._is_render:
-            self.client = p.connect(p.GUI)
+            self.client = bc.BulletClient(connection_mode=p.GUI)
         else:
-            self.client = p.connect(p.DIRECT)
+            self.client = bc.BulletClient(connection_mode=p.DIRECT)
 
         if self.client == -1:
             raise RuntimeError('Pybullet could not connect to physics client')
 
-        # urdfFlags = p.URDF_USE_SELF_COLLISION
-        self.plane = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'), 
-                                physicsClientId=self.client)
-        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-        #                             basePosition=[0,0,0.48], 
-        #                             baseOrientation=[0,0,0,1], 
-        #                             flags = urdfFlags, 
-        #                             useFixedBase=False,
-        #                             physicsClientId=self.client)
+        self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, max_torque=self.max_torque, kp=self.kp, kd=self.kd)
 
-        # # fixed base for debugging 
-        # self.quadruped = p.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-        #     basePosition=[0,0,2.0],baseOrientation=[0,0,0,1], flags = urdfFlags,useFixedBase=True, 
-        #       physicsClientId=self.client)
+        self.client.setGravity(0,0,-9.8)
+        self.client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
+        self.client.setTimeStep(1/240.)
 
-        p.setGravity(0,0,-9.8, physicsClientId=self.client)
-        # self.quadruped.foot_links = [5, 9, 13, 17]
-        # self.lower_legs = [2,5,8,11]
-        # for l0 in self.lower_legs:
-        #     for l1 in self.lower_legs:
-        #         if (l1>l0):
-        #             enableCollision = 1
-        #             # print("collision for pair",l0,l1, p.getJointInfo(self.quadruped,l0, physicsClientId=self.client)[12],p.getJointInfo(self.quadruped,l1, physicsClientId=self.client)[12], "enabled=",enableCollision)
-        #             p.setCollisionFilterPair(self.quadruped, self.quadruped, l0,l1,enableCollision, physicsClientId=self.client)
-
-        p.setRealTimeSimulation(0, physicsClientId=self.client) # this has no effect in DIRECT mode, only GUI mode
-        # below is the default. Simulation params need to be retuned if this is changed
-        p.setTimeStep(1/240., physicsClientId=self.client)
-
-        # for i in range (p.getNumJoints(self.quadruped, physicsClientId=self.client)):
-        #     p.changeDynamics(self.quadruped,i,linearDamping=0, angularDamping=.5, physicsClientId=self.client)
-
-        # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL
-        # self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] # the other joints in the urdf are fixed joints 
-        # self.quadruped.n_motors = 12
 
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
-        self.state_space_dim = (12 * 3 + 4 + 4 + 3 + 3 + self.trot_prior)# * self.n_action_to_concat
+        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 
         self.num_joints = 18 # This includes fixed joints from the URDF
         self.action_space_dim = self.quadruped.n_motors
-        # self.action_ub = np.empty(self.action_space_dim)
-        # self.action_lb = np.empty(self.action_space_dim)
-        # self.action_mean = np.empty(self.action_space_dim)
-        # self.action_range = np.empty(self.action_space_dim)
-        # self.observation_ub = np.empty(self.state_space_dim)
-        # self.observation_lb = np.empty(self.state_space_dim)
+
 
         self.state = np.zeros(self.state_space_dim) 
         self.applied_torques = np.zeros(self.quadruped.n_motors)
@@ -163,12 +62,8 @@ class AliengoEnv(gym.Env):
         self.base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
         self.previous_base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
-        # self.previous_lower_limb_vels = np.zeros(4 * 6)
-        # self.state_noise_std = 0.03125  * np.array([3.14, 40] * 12 + [0.78 * 0.25] * 4 + [0.25] * 3)
         self.eps_step_counter = 0 # Used for triggering timeout
         self.t = 0 # represents the actual time
-        self.cycle_clock = 0 # cycle time for imitation learning a gait
-        # self.trot_loss_history = np.array([]) # return average trot_loss at end of episode
 
 
         self.reward = 0 # this is to store most recent reward
@@ -190,11 +85,12 @@ class AliengoEnv(gym.Env):
     def _is_non_foot_ground_contact(self):
         """Detect if any parts of the robot, other than the feet, are touching the ground."""
 
+        raise NotImplementedError
         contact = False
         for i in range(self.num_joints):
             if i in self.quadruped.foot_links: # the feet themselves are allow the touch the ground
                 continue
-            points = p.getContactPoints(self.quadruped.quadruped, self.plane, linkIndexA=i, physicsClientId=self.client)
+            points = self.client.getContactPoints(self.quadruped.quadruped, self.plane, linkIndexA=i)
             if len(points) != 0:
                 contact = True
         return contact
@@ -205,10 +101,9 @@ class AliengoEnv(gym.Env):
 
         contacts = [0] * 4
         for i in range(len(self.quadruped.foot_links)):
-            info = p.getContactPoints(self.quadruped.quadruped, 
+            info = self.client.getContactPoints(self.quadruped.quadruped, 
                                         self.plane, 
-                                        linkIndexA=self.quadruped.foot_links[i],
-                                        physicsClientId=self.client)
+                                        linkIndexA=self.quadruped.foot_links[i])
             if len(info) == 0: # leg does not contact ground
                 contacts[i] = 0 
             elif len(info) == 1: # leg has one contact with ground
@@ -224,23 +119,7 @@ class AliengoEnv(gym.Env):
         if (contacts > 10_000).any():
             warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
 
-        # begin code for debugging foot contacts
-        # debug = [0] * 4
-        # for i in range(len(self.quadruped.foot_links)):
-        #     info = p.getContactPoints(self.quadruped.quadruped, 
-        #                                 self.plane, 
-        #                                 linkIndexA=self.quadruped.foot_links[i],
-        #                                 physicsClientId=self.client)
-        #     if len(info) == 0: # leg does not contact ground
-        #         debug[i] = 0 
-        #     elif len(info) == 1: # leg has one contact with ground
-        #         debug[i] = info[0][9] # contact normal force
-        #     else: # use the contact point with the max normal force when there is more than one contact on a leg
-        #         normals = [info[i][9] for i in range(len(info))]
-        #         debug[i] = normals
-        #         # print('\nmultiple contacts' + '*' * 100 + '\n')
-        # debug = debug
-        return contacts #, debug
+        return contacts 
 
 
     def step(self, action):
@@ -254,21 +133,13 @@ class AliengoEnv(gym.Env):
         else:
             action = action
 
-        # p.setJointMotorControlArray(self.quadruped,
-        #     self.motor_joint_indices,
-        #     controlMode=p.POSITION_CONTROL,
-        #     targetPositions=_action,
-        #     forces=self.max_torque * np.ones(self.quadruped.n_motors),
-        #     positionGains=self.kp * np.ones(12),
-        #     velocityGains=self.kd * np.ones(12),
-        #     physicsClientId=self.client)
         self.quadruped.set_joint_position_targets(action)
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
             raise NotImplementedError
             self._apply_perturbation()
         for _ in range(self.n_hold_frames):
-            p.stepSimulation(physicsClientId=self.client)
+            self.client.stepSimulation()
         self.eps_step_counter += 1
         self._update_state()
         done, info = self._is_state_terminal()
@@ -277,9 +148,7 @@ class AliengoEnv(gym.Env):
         # info = {'':''} # this is returned so that env.step() matches Open AI gym API
         if done:
             self.eps_step_counter = 0
-            # if self.trot_prior:
-                # info['avg_trot_loss'] = self.trot_loss_history.mean()
-                # self.trot_loss_history = np.array([])
+
         return self.state, self.reward, done, info
 
         
@@ -287,10 +156,10 @@ class AliengoEnv(gym.Env):
         raise NotImplementedError
         if np.random.rand() > 0.5: # apply force
             force = tuple(10 * (np.random.rand(3) - 0.5))
-            p.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME, physicsClientId=self.client)
+            self.client.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
         else: # apply torque
             torque = tuple(0.5 * (np.random.rand(3) - 0.5))
-            p.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME, physicsClientId=self.client)
+            self.client.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
 
 
     def reset(self): #TODO add stochasticity to the initial starting state
@@ -298,14 +167,13 @@ class AliengoEnv(gym.Env):
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
-        p.resetBasePositionAndOrientation(self.quadruped.quadruped,
+        self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,0.48], 
-                                            ornObj=[0,0,0,1.0],
-                                            physicsClientId=self.client) 
+                                            ornObj=[0,0,0,1.0]) 
 
         self.quadruped.reset_joint_positions() # will put all joints at default starting positions
         for i in range(500): # to let the robot settle on the ground.
-            p.stepSimulation(physicsClientId=self.client)
+            self.client.stepSimulation()
         self._update_state()
         return self.state
 
@@ -316,8 +184,7 @@ class AliengoEnv(gym.Env):
         RENDER_WIDTH = 480 
         RENDER_HEIGHT = 360
 
-        base_x_velocity = np.array(p.getBaseVelocity(self.quadruped.quadruped, 
-                                    physicsClientId=self.client)).flatten()[0]
+        base_x_velocity = np.array(self.client.getBaseVelocity(self.quadruped.quadruped)).flatten()[0]
         torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
 
         # RENDER_WIDTH = 960 
@@ -327,28 +194,25 @@ class AliengoEnv(gym.Env):
         # RENDER_HEIGHT = 1080
 
         if mode == 'rgb_array':
-            base_pos, _ = p.getBasePositionAndOrientation(self.quadruped.quadruped, physicsClientId=self.client)
+            base_pos, _ = self.client.getBasePositionAndOrientation(self.quadruped.quadruped)
             # base_pos = self.minitaur.GetBasePosition()
-            view_matrix = p.computeViewMatrixFromYawPitchRoll(
+            view_matrix = self.client.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=base_pos,
                 distance=2.0,
                 yaw=0,
                 pitch=-30.,
                 roll=0,
-                upAxisIndex=2,
-                physicsClientId=self.client)
-            proj_matrix = p.computeProjectionMatrixFOV(fov=60,
+                upAxisIndex=2)
+            proj_matrix = self.client.computeProjectionMatrixFOV(fov=60,
                 aspect=float(RENDER_WIDTH) /
                 RENDER_HEIGHT,
                 nearVal=0.1,
-                farVal=100.0,
-                physicsClientId=self.client)
-            _, _, px, _, _ = p.getCameraImage(width=RENDER_WIDTH,
+                farVal=100.0)
+            _, _, px, _, _ = self.client.getCameraImage(width=RENDER_WIDTH,
                 height=RENDER_HEIGHT,
                 viewMatrix=view_matrix,
                 projectionMatrix=proj_matrix,
-                renderer=p.ER_BULLET_HARDWARE_OPENGL,
-                physicsClientId=self.client)
+                renderer=p.ER_BULLET_HARDWARE_OPENGL)
             img = np.array(px)
             img = img[:, :, :3]
             img = putText(np.float32(img), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
@@ -384,14 +248,8 @@ class AliengoEnv(gym.Env):
 
     def close(self):
         '''I belive this is required for an Open AI gym env.'''
+
         pass
-
-    # def _positions_to_actions(self, positions):
-    #     return (positions - self.action_mean) / (self.action_range * 0.5)
-  
-
-    # def _action_to_positions(self, actions):
-    #     return actions * (self.action_range * 0.5) + self.action_mean
 
 
     def _find_space_limits(self):
