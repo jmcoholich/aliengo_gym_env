@@ -275,7 +275,7 @@ class AliengoEnv(gym.Env):
 
         base_x_velocity = self.base_twist[0]
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        return base_x_velocity - 0.0001 * torque_penalty 
+        return base_x_velocity - 0.001 * torque_penalty 
 
 
 
