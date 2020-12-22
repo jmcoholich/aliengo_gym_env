@@ -203,7 +203,7 @@ class AliengoSteppingStones(gym.Env):
                                             posObj=[0,0,self.height + 0.48], 
                                             ornObj=[0,0,0,1.0]) 
 
-        self.quadruped.reset_joint_positions() # will put all joints at default starting positions
+        self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
         self._update_state()
@@ -418,7 +418,7 @@ class AliengoSteppingStones(gym.Env):
 
         base_x_velocity = self.base_twist[0]
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        finish_bonus = (self.base_position[0] >= self.course_length + 2) * 20 
+        finish_bonus = (self.base_position[0] >= self.course_length + 2) * 200 
         return base_x_velocity - 0.000005 * torque_penalty + finish_bonus
 
 

@@ -173,15 +173,23 @@ class Aliengo:
         return np.array(self.client.getBaseVelocity(self.quadruped)).flatten()
 
         
-    def reset_joint_positions(self, positions=None):
+    def reset_joint_positions(self, positions=None, stochastic=True):
         '''Note: This ignores any physics or controllers and just overwrites joint positions to the given value''' 
 
         if positions: 
             positions = self._actions_to_positions(positions)
         else: 
             # use the default starting position, knees slightly bent, from first line of mocap file
-            positions = [0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
-                            -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304]
+            positions = np.array([0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
+                            -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304])
+
+        if stochastic: 
+            # add random noise to positions
+            noise = (np.random.rand(12) - 0.5) * self.position_range * 0.05
+            positions += noise
+            positions = np.clip(positions, self.positions_lb, self.positions_ub)
+
+
 
         for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
             self.client.resetJointState(self.quadruped, 
