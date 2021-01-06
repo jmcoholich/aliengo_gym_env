@@ -11,14 +11,17 @@ from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
 from pybullet_utils import bullet_client as bc
 from noise import pnoise2
-# from importlib import reload
+
 
 '''
 Env for rolling hills, meant to replicate the Hills env used in this paper: 
 https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 '''
 class AliengoHills(gym.Env):
-    def __init__(self, render=False, realTime=False):
+    def __init__(self, render=False, realTime=False,
+                scale=0.5, # good values range from 5.0 (easy) to 0.5 (hard)
+                amplitude=1.0): # try [0.1, 1.0]
+        
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
@@ -31,18 +34,20 @@ class AliengoHills(gym.Env):
         self.realTime = realTime
 
         # Hills parameters, all units in meters
+        self.hills_height = amplitude
         self.mesh_res = 10 # int, points/meter
         self.hills_length = 50
         self.hills_width = 5
-        self.hills_height = 1.0
         self.ramp_distance = 1.0
 
         # Perlin Noise parameters
-        self.scale =self.mesh_res 
+        self.scale = self.mesh_res  * scale
         self.octaves = 1
-        self.persistence = 0.5
+        self.persistence = 0.0 # roughness basically (assuming octaves > 1)
         self.lacunarity = 2.0
         self.base = 0 # perlin noise base, to be randomized
+
+        assert self.scale != 1.0 # this causes terrain of zero to be returned
 
 
         # heightmap parameters
@@ -58,7 +63,8 @@ class AliengoHills(gym.Env):
         else:
             self.client = bc.BulletClient(connection_mode=p.DIRECT)
         self.fake_client = bc.BulletClient(connection_mode=p.DIRECT) # this is only used for getting the heightmap 
-
+        self.client.setPhysicsEngineParameter(enableFileCaching=0)
+        self.fake_client.setPhysicsEngineParameter(enableFileCaching=0)
 
         if (self.client == -1) or (self.fake_client == -1):
             raise RuntimeError('Pybullet could not connect to physics client')
@@ -218,7 +224,9 @@ class AliengoHills(gym.Env):
 
     def _create_hills(self):
         '''Creates an identical hills mesh using Perlin noise. Added to client and fake client'''
-
+        
+        # if os.path.exists('__pycache__'):
+        #     rmtree('__pycache__')
         mesh_length = self.hills_length * self.mesh_res
         mesh_width = self.hills_width * self.mesh_res
 
@@ -270,6 +278,13 @@ class AliengoHills(gym.Env):
                                                         (mesh_width + 1)*(i+1) + j+2, 
                                                         (mesh_width + 1)*i + j+2)) 
 
+        with open('../meshes/generated_hills.obj', 'r') as f:
+            counter = 0
+            for line in f:
+                counter +=1
+                if counter == 748:
+                    break
+            print(line)
         terrain = self.client.createCollisionShape(p.GEOM_MESH, 
                                                     meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
                                                     fileName='../meshes/generated_hills.obj',
@@ -342,7 +357,7 @@ class AliengoHills(gym.Env):
         
 
     def render(self, mode='human', client=None):
-        '''Setting the render kwarg in the constructor determines if the env will render or not.'''
+        '''default mode does nothing. 'rgb_array' returns image of env. '''
 
         if client is None: # for some reason I can't use self.client as a default value in the function definition line.
             client = self.client 
@@ -510,14 +525,16 @@ if __name__ == '__main__':
     '''This test open the simulation in GUI mode for viewing the generated terrain, then saves a rendered image of each
     client for visual verification that the two are identical. There are two resets to ensure that the deletion and 
     addition of terrain elements is working properly. '''
-
-
-    env = gym.make('gym_aliengo:AliengoHills-v0', render=True, realTime=False)
-    # env.reset()
     # imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
     # imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
-    for _ in range(10):
+
+    # sys.dont_write_bytecode = True
+    env = gym.make('gym_aliengo:AliengoHills-v0', render=True, realTime=True)
+    # for _ in range(1):
+    #     env.reset()
+    
+    while True:
         env.reset()
-        # time.sleep(.1)
+        time.sleep(1.0)
 
 
