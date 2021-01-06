@@ -10,13 +10,14 @@ import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
 from pybullet_utils import bullet_client as bc
+from noise import pnoise2
+# from importlib import reload
 
 '''
-TODO
-- log distance traveled
-- use createCollisionShapeArray
+Env for rolling hills, meant to replicate the Hills env used in this paper: 
+https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 '''
-class AliengoSteppingStones(gym.Env):
+class AliengoHills(gym.Env):
     def __init__(self, render=False, realTime=False):
         # Environment Options
         self._apply_perturbations = False
@@ -29,13 +30,20 @@ class AliengoSteppingStones(gym.Env):
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.realTime = realTime
 
-        # stepping stone parameters
-        self.height = 1.0 # height of the heightfield
-        self.course_length = 10.0 # total distance from edge of start block to edge of end block 
-        self.course_width = 2.0 # widght of path of stepping stones 
-        self.stone_length = 0.25 # side length of square stepping stones
-        self.stone_density = 6.0 # stones per square meter 
-        self.stone_height_range = 0.25 # heights of stones will be within [self.height - this/2, self.height + this/2 ]
+        # Hills parameters, all units in meters
+        self.mesh_res = 10 # int, points/meter
+        self.hills_length = 50
+        self.hills_width = 5
+        self.hills_height = 1.0
+        self.ramp_distance = 1.0
+
+        # Perlin Noise parameters
+        self.scale =self.mesh_res 
+        self.octaves = 1
+        self.persistence = 0.5
+        self.lacunarity = 2.0
+        self.base = 0 # perlin noise base, to be randomized
+
 
         # heightmap parameters
         self.length = 1.25 # assumes square 
@@ -93,11 +101,8 @@ class AliengoSteppingStones(gym.Env):
             high=observation_ub,
             dtype=np.float32
             )
-
-
-        # self._stone_ids = []
-        # self._fake_stone_ids = [] # this is for the self.fake_client simulation instance
         
+
 
 
     def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
@@ -159,12 +164,9 @@ class AliengoSteppingStones(gym.Env):
         done, info = self._is_state_terminal()
         self.reward = self._reward_function()
 
-        # info = {'':''} # this is returned so that env.step() matches Open AI gym API
         if done:
             self.eps_step_counter = 0
-            # if self.trot_prior:
-                # info['avg_trot_loss'] = self.trot_loss_history.mean()
-                # self.trot_loss_history = np.array([])
+
         return self.state, self.reward, done, info
 
         
@@ -192,7 +194,7 @@ class AliengoSteppingStones(gym.Env):
         
         self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
         self.fake_plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        self._create_stepping_stones()
+        self._create_hills()
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                         max_torque=self.max_torque, 
                                         kp=self.kp, 
@@ -201,7 +203,7 @@ class AliengoSteppingStones(gym.Env):
 
         
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
-                                            posObj=[0,0,self.height + 0.48], 
+                                            posObj=[0,0,0.48], 
                                             ornObj=[0,0,0,1.0]) 
 
         self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
@@ -212,48 +214,77 @@ class AliengoSteppingStones(gym.Env):
         return self.state
         
     
-    # def _remove_stepping_stones(self):
-    #     '''Removes the stepping stones in the fake_client and in the client'''
-
-    #     for _id in self._stone_ids:
-    #         self.client.removeBody(_id)
-    #     self._stone_ids = []
-
-    #     for _id in self._fake_stone_ids:
-    #         self.fake_client.removeBody(_id)
-    #     self._fake_stone_ids = []
 
 
-    def _create_stepping_stones(self):
-        '''Creates an identical set of stepping stones in client and fake_client.'''
+    def _create_hills(self):
+        '''Creates an identical hills mesh using Perlin noise. Added to client and fake client'''
 
-        # Randomly generate stone locations and heights 
-        n_stones = int(self.course_length * self.course_width * self.stone_density)
-        stone_heights = (np.random.rand(n_stones) - 0.5) * self.stone_height_range + self.height/2.0 
-        stone_x = np.random.rand(n_stones) * self.course_length + 1.0
-        stone_y = (np.random.rand(n_stones) - 0.5) * self.course_width
+        mesh_length = self.hills_length * self.mesh_res
+        mesh_width = self.hills_width * self.mesh_res
 
-        for client in [self.client, self.fake_client]:
-            start_block = client.createCollisionShape(p.GEOM_BOX, 
-                                                halfExtents=[1, self.course_width/2.0, self.height/2.0])
-            stepping_stone = client.createCollisionShape(p.GEOM_BOX, 
-                                                halfExtents=[self.stone_length/2.0, self.stone_length/2.0, self.height/2.0])
-            start_body = client.createMultiBody(baseCollisionShapeIndex=start_block, 
-                                            basePosition=[0,0,self.height/2.0])
-            end_body = client.createMultiBody(baseCollisionShapeIndex=start_block, 
-                                            basePosition=[self.course_length + 2.0, 0, self.height/2.],)
-            
-            # if client == self.client:
-            #     self._stone_ids = [start_body, end_body]
-            # else:
-            #     self._fake_stone_ids = [start_body, end_body]
-            for i in range(n_stones):
-                _id = client.createMultiBody(baseCollisionShapeIndex=stepping_stone, 
-                                        basePosition=[stone_x[i], stone_y[i], stone_heights[i]])
-                # if client == self.client:                      
-                #     self._stone_ids.append(_id)
-                # else:
-                #     self._fake_stone_ids.append(_id)
+        vertices = np.zeros((mesh_length + 1, mesh_width + 1))
+        self.base = np.random.randint(300)
+        for i in range(mesh_length + 1):
+            for j in range(mesh_width + 1):
+                vertices[i, j] = pnoise2(float(i)/(self.scale),
+                                            float(j)/(self.scale),
+                                            octaves=self.octaves,
+                                            persistence=self.persistence,
+                                            lacunarity=self.lacunarity,
+                                            repeatx=mesh_length + 1,
+                                            repeaty=mesh_width + 1,
+                                            base=self.base) # base is the seed
+        # from PIL import Image
+        # Image.fromarray(((np.interp(vertices, (vertices.min(), vertices.max()), (0, 255.0))>128)*255).astype('uint8'), 'L').show()
+        vertices = np.interp(vertices, (vertices.min(), vertices.max()), (0, 1.0))
+
+
+        # ramp down the n meters, so the robot can walk onto the hills terrain
+        for i in range(int(self.ramp_distance * self.mesh_res)):
+            vertices[i, :] *= i/(self.ramp_distance * self.mesh_res)
+        vertices = vertices * self.hills_height # terrain height
+        # os.remove('../meshes/generated_hills.obj')
+        with open('../meshes/generated_hills.obj','w') as f:
+            f.write('o Generated_Hills_Terrain\n')
+            # write vertices
+            for i in range(mesh_length + 1):
+                for j in range(mesh_width + 1):
+                    f.write('v  {}   {}   {}\n'.format(i, j, vertices[i, j]))
+
+            # write faces 
+            for i in range(mesh_length):
+                for j in range(mesh_width):
+                    # bottom left triangle
+                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+1, 
+                                                        (mesh_width + 1)*i + j+2, 
+                                                        (mesh_width + 1)*(i+1) + j+1)) 
+                    # top right triangle
+                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+2, 
+                                                        (mesh_width + 1)*(i+1) + j+1, 
+                                                        (mesh_width + 1)*i + j+2)) 
+                    # repeat, making faces double-sided
+                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+2, 
+                                                        (mesh_width + 1)*i + j+1, 
+                                                        (mesh_width + 1)*(i+1) + j+1)) 
+                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+1, 
+                                                        (mesh_width + 1)*(i+1) + j+2, 
+                                                        (mesh_width + 1)*i + j+2)) 
+
+        terrain = self.client.createCollisionShape(p.GEOM_MESH, 
+                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
+                                                    fileName='../meshes/generated_hills.obj',
+                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+        fake_terrain = self.fake_client.createCollisionShape(p.GEOM_MESH, 
+                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
+                                                    fileName='../meshes/generated_hills.obj',
+                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+        
+        ori = self.client.getQuaternionFromEuler([0, 0, 0])
+        pos = [0.5 , -self.hills_width/2, 0]
+        self.client.createMultiBody(baseCollisionShapeIndex=terrain, baseOrientation=ori, basePosition=pos)
+        self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_terrain, baseOrientation=ori, basePosition=pos)
+
+
 
     
     def _get_heightmap(self):
@@ -280,7 +311,7 @@ class AliengoSteppingStones(gym.Env):
         coordinates[1,:,:] += base_y  
         # coordinates has shape (2, self.grid_len, self.grid_len)
         coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
-        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * (self.height + self.stone_height_range), axis=1)
+        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * (self.hills_height), axis=1)
         ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
         raw_output = self.fake_client.rayTestBatch(ray_start, ray_end) 
         z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
@@ -289,7 +320,7 @@ class AliengoSteppingStones(gym.Env):
         if debug:
             # #print xy coordinates of robot origin 
             # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
-            #             textPosition=[base_x, base_y,self.height+1],
+            #             textPosition=[base_x, base_y,self.hills_height+1],
             #             textColorRGB=[0,0,0])
             # self._debug_ids.append(_id)
             for i in range(self.grid_len):
@@ -299,10 +330,10 @@ class AliengoSteppingStones(gym.Env):
                     else:
                         text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
                     _id = self.client.addUserDebugText(text=text,
-                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.height+0.5],
+                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
                                             textColorRGB=[0,0,0])
                     self._debug_ids.append(_id)
-                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.height+0.5],
+                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
                                             [coordinates[0,i,j], coordinates[1,i,j], 0],
                                             lineColorRGB=[0,0,0] )
                     self._debug_ids.append(_id)
@@ -399,7 +430,7 @@ class AliengoSteppingStones(gym.Env):
                                         np.zeros(4), # foot normal forces
                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
                                         -1e5 * np.ones(3), # angular velocity (arbitrary bound)
-                                        -np.ones(self.grid_len**2) * (self.height + self.stone_height_range/2.0 + 5))) # 5 is a safe arbitrary value 
+                                        -np.ones(self.grid_len**2) * (self.hills_height + 5))) # 5 is a safe arbitrary value 
 
         observation_ub = np.concatenate((torque_ub, 
                                         position_ub, 
@@ -408,7 +439,7 @@ class AliengoSteppingStones(gym.Env):
                                         1e4 * np.ones(4), # arbitrary bound
                                         1e5 * np.ones(3),
                                         1e5 * np.ones(3),
-                                        np.ones(self.grid_len**2) * (self.height + self.stone_height_range/2.0 + 5)))
+                                        np.ones(self.grid_len**2) * (self.hills_height + 5)))
 
 
         return observation_lb, observation_ub
@@ -429,7 +460,7 @@ class AliengoSteppingStones(gym.Env):
 
         info = {}
 
-        fell = self.base_position[2] <= (self.height - self.stone_height_range/2.0)
+        fell = self.base_position[2] <= (self.hills_height - self.stone_height_range/2.0)
         reached_goal = (self.base_position[0] >= self.course_length + 2)
         timeout = (self.eps_step_counter >= self.eps_timeout)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
@@ -481,24 +512,12 @@ if __name__ == '__main__':
     addition of terrain elements is working properly. '''
 
 
-    # import pybullet_envs
-    # env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=False, realTime=False)
-    # # env = gym.make('MinitaurBulletEnv-v0')
-    # for _ in range(1000):
-    #     # env._create_stepping_stones()
-    #     # env._remove_stepping_stones()
-    #     # p.resetSimulation(env.client)
-    #     # p.resetSimulation(env.fake_client)
-    #     env.reset()
-    # sys.exit()
-
-
-    env = gym.make('gym_aliengo:AliengoSteppingStones-v0', render=True, realTime=True)
-    env.reset()
-    imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
-    imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
-
-    while True:
-        time.sleep(1)
+    env = gym.make('gym_aliengo:AliengoHills-v0', render=True, realTime=False)
+    # env.reset()
+    # imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
+    # imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
+    for _ in range(10):
+        env.reset()
+        # time.sleep(.1)
 
 
