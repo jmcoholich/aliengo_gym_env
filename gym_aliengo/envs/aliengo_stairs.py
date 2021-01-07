@@ -13,13 +13,13 @@ from pybullet_utils import bullet_client as bc
 from math import ceil
 
 '''
-Env for steps (random "grid" of elevated rectangles), meant to replicate the Steps env used in this paper: 
+Env for stairs meant to replicate the Steps env used in this paper: 
 https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 '''
-class AliengoSteps(gym.Env):
+class AliengoStairs(gym.Env):
     def __init__(self, render=False, realTime=False,
-                row_width=0.5, # range from [0.1, 1.0] (hard to easy) default=0.5
-                terrain_height_range=0.25): # range from [0.0, 0.375] (easy to hard) default=0.25
+                step_height=0.25, # [0.0, 0.5?] unknown how high we can really go Default = 0.25
+                step_length=2.0): # [0.25, 3.0] Default = 2.0
 
         # Environment Options
         self._apply_perturbations = False
@@ -32,17 +32,16 @@ class AliengoSteps(gym.Env):
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.realTime = realTime
 
-        # Terrain parameters, all units in meters
-        assert row_width > 0.01
-        self.row_width = row_width
-        self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
-        self.terrain_length = 5 #TODO change this back to 50, and make this parameter scale with reward because terrain
-        # generation takes a lot of time 
-        self.terrain_width = 3 
-        self.terrain_height = terrain_height_range/2. + 0.05 # this is just the mean height of the blocks
+        # Stairs parameters, all units in meters
+        self.stairs_length = 50
+        self.stairs_width = 10
+        self.step_height = step_height # this is a mean
+        self.step_length = step_length # this is a mean
+        self.step_height_range = self.step_height/2.
+        self.step_length_range = self.step_length/2.
 
-        self.block_length_range = self.row_width/2. # the mean is set to the same as row_width. 
-        self.ramp_distance = self.terrain_height * 4
+        self.max_height = self.stairs_length / self.step_length * self.step_height * 2
+
 
         # heightmap parameters
         self.length = 1.25 # assumes square 
@@ -51,7 +50,7 @@ class AliengoSteps(gym.Env):
         assert self.length%self.grid_spacing == 0
         self.grid_len = int(self.length/self.grid_spacing) + 1
 
-
+      
         if self._is_render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
         else:
@@ -191,7 +190,7 @@ class AliengoSteps(gym.Env):
         
         self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
         self.fake_plane = self.fake_client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        self._create_steps()
+        self._create_stairs()
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                         max_torque=self.max_torque, 
                                         kp=self.kp, 
@@ -209,38 +208,29 @@ class AliengoSteps(gym.Env):
         return self.state
 
 
-    def _create_steps(self):
+    def _create_stairs(self):
         '''Creates an identical steps terrain in client and fake client'''
-        
-        # pick a list of discrete values for heights to only generate a finite number of collision shapes
-        n_shapes = 10
-        height_values = np.linspace(-self.terrain_height_range/2., self.terrain_height_range/2., n_shapes)
-        length_values = np.linspace(self.row_width - self.block_length_range/2.,
-                                    self.row_width + self.block_length_range/2.,
-                                    n_shapes)      
-        shapeId = np.zeros(n_shapes, dtype=np.int)
-        fake_shapeId = np.zeros(n_shapes, dtype=np.int)
-        for i in range(len(length_values)):
-            halfExtents=[length_values[i]/2., self.row_width/2., self.terrain_height/2.] 
-            shapeId[i] = self.client.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
-            fake_shapeId[i] = self.fake_client.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
 
-        for row in range(int(ceil(self.terrain_width/self.row_width))):
-            total_len = 0
-            while total_len < self.terrain_length:
-                i = np.random.randint(0, n_shapes)
-                j = np.random.randint(0, n_shapes)
-                if total_len < self.ramp_distance:
-                    offset = self.terrain_height * (1 - float(total_len)/self.ramp_distance)
-                else:
-                    offset = 0
-                pos = [total_len + length_values[i]/2. + 0.5, # X
-                        row * self.row_width - self.terrain_width/2. + self.row_width/2., # Y
-                        height_values[j] - offset + self.terrain_height/2.] # Z
-                self.client.createMultiBody(baseCollisionShapeIndex=shapeId[i], basePosition=pos)
-                self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_shapeId[i], basePosition=pos)
-                total_len += length_values[i]
-      
+        # set thickness to largest height so that there are never any gaps in the stairs
+        step_thickness = self.step_height + self.step_height_range/2. + 0.01 
+        
+        # I think I can use the same collision shape for everything
+        halfExtents = [(self.step_length + self.step_length_range/2. + 0.01) / 2., 
+                        self.stairs_width/2., 
+                        step_thickness/2.]
+        _id = self.client.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
+        fake_id = self.fake_client.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
+
+        total_len = 0
+        total_height = 0
+        while total_len < self.stairs_length:
+            height = (np.random.rand() - 0.5) * self.step_height_range + self.step_height
+            length = (np.random.rand() - 0.5) * self.step_length_range + self.step_length
+            pos = [total_len + length/2. + 1.0, 0.0, total_height + height/2.]
+            self.client.createMultiBody(baseCollisionShapeIndex=_id, basePosition=pos)
+            self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_id, basePosition=pos)
+            total_len += length
+            total_height += height
         
      
     def _get_heightmap(self):
@@ -268,8 +258,7 @@ class AliengoSteps(gym.Env):
         coordinates[1,:,:] += base_y  
         # coordinates has shape (2, self.grid_len, self.grid_len)
         coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
-        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * \
-                                                    (self.terrain_height + self.terrain_height_range/2. + 1.), axis=1)
+        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * self.max_height, axis=1)
         ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
         raw_output = self.fake_client.rayTestBatch(ray_start, ray_end) 
         z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
@@ -288,10 +277,10 @@ class AliengoSteps(gym.Env):
                     else:
                         text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
                     _id = self.client.addUserDebugText(text=text,
-                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.terrain_height+0.5],
+                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.max_height+0.5],
                                             textColorRGB=[0,0,0])
                     self._debug_ids.append(_id)
-                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.terrain_height+0.5],
+                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.max_height+0.5],
                                             [coordinates[0,i,j], coordinates[1,i,j], 0],
                                             lineColorRGB=[0,0,0] )
                     self._debug_ids.append(_id)
@@ -388,7 +377,7 @@ class AliengoSteps(gym.Env):
                                         np.zeros(4), # foot normal forces
                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
                                         -1e5 * np.ones(3), # angular velocity (arbitrary bound)
-                                        -np.ones(self.grid_len**2) * (self.terrain_height + 5))) # 5 is a safe arbitrary value 
+                                        -np.ones(self.grid_len**2) * (self.max_height)))
 
         observation_ub = np.concatenate((torque_ub, 
                                         position_ub, 
@@ -397,7 +386,7 @@ class AliengoSteps(gym.Env):
                                         1e4 * np.ones(4), # arbitrary bound
                                         1e5 * np.ones(3),
                                         1e5 * np.ones(3),
-                                        np.ones(self.grid_len**2) * (self.terrain_height + 5)))
+                                        np.ones(self.grid_len**2) * (self.max_height)))
 
 
         return observation_lb, observation_ub
@@ -416,25 +405,20 @@ class AliengoSteps(gym.Env):
 
         info = {}
 
-        base_z_position = self.base_position[2]
-        height_out_of_bounds = ((base_z_position < 0.2) or \
-                                (base_z_position > 0.8 + self.terrain_height + self.terrain_height_range/2.))
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
-                    (self.base_position[0] >= self.terrain_length - 1.0)
+                    (self.base_position[0] >= self.stairs_length - 2.0)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
         flipping = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78*2.5, 1e10]).any())
-        y_out_of_bounds = not (-self.terrain_width/2. < self.base_position[1] < self.terrain_width/2.)
+        y_out_of_bounds = not (-self.stairs_width/2. < self.base_position[1] < self.stairs_width/2.)
 
         if flipping:
             info['termination_reason'] = 'flipping'
-        elif height_out_of_bounds:
-            info['termination_reason'] = 'height_out_of_bounds'
         elif y_out_of_bounds:
             info['termination_reason'] = 'y_out_of_bounds'
         elif timeout: # {'TimeLimit.truncated': True}
             info['TimeLimit.truncated'] = True
 
-        return any([flipping, height_out_of_bounds, timeout, y_out_of_bounds]), info
+        return any([flipping, timeout, y_out_of_bounds]), info
 
 
     def _update_state(self):
@@ -470,7 +454,7 @@ if __name__ == '__main__':
     client for visual verification that the two are identical. Then the script just keeps generating random terrains 
     for viewing. '''
 
-    env = gym.make('gym_aliengo:AliengoSteps-v0', render=True, realTime=True)
+    env = gym.make('gym_aliengo:AliengoStairs-v0', render=True, realTime=True)
     imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
     imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
 
