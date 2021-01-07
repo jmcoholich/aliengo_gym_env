@@ -10,22 +10,17 @@ import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
 from pybullet_utils import bullet_client as bc
-from noise import pnoise2
-from random import randint
+from math import ceil
 
 '''
-Env for rolling hills, meant to replicate the Hills env used in this paper: 
+Env for steps (random "grid" of elevated rectangles), meant to replicate the Steps env used in this paper: 
 https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
-TODO: find a better way to save terrain files so that they don't conflict, rather than assigning a random number to 
-each name. OR find a way to not have to save the .obj file at all.
-- Additionally, add a way to clear out the generated terrain .obj files after I'm doing training...not sure if possible 
-to add that from the env code.
 '''
-class AliengoHills(gym.Env):
+class AliengoSteps(gym.Env):
     def __init__(self, render=False, realTime=False,
-                scale=1.0, # good values range from 5.0 (easy) to 0.5 (hard)
-                amplitude=0.75): # try [0.1, 1.0]
-        
+                row_width=0.5, # range from [0.1, 1.0] (hard to easy) default=0.5
+                terrain_height_range=0.25): # range from [0.0, 0.375] (easy to hard) default=0.25
+
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
@@ -37,31 +32,16 @@ class AliengoHills(gym.Env):
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.realTime = realTime
 
-        # Hills parameters, all units in meters
-        self.hills_height = amplitude
-        self.mesh_res = 10 # int, points/meter
-        self.hills_length = 50
-        self.hills_width = 3
-        self.ramp_distance = 1.0
+        # Terrain parameters, all units in meters
+        assert row_width > 0.01
+        self.row_width = row_width
+        self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
+        self.terrain_length = 50
+        self.terrain_width = 3 
+        self.terrain_height = terrain_height_range + 0.05 # this is just the mean height of the blocks
 
-        # this is a random id appened to terrain file name, so that each env instance doesn't overwrite another one.
-        # use randint for filenames, since the np random seed is set, all env instances will get the same random number,
-        #  causing them to all write to the same file.
-        self.env_terrain_id = randint(0, 1e18) 
-        self.path = os.path.join(os.path.dirname(__file__),
-                                    '../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
-
-        
-
-        # Perlin Noise parameters
-        self.scale = self.mesh_res * scale
-        self.octaves = 1
-        self.persistence = 0.0 # roughness basically (assuming octaves > 1). I'm not using this.
-        self.lacunarity = 2.0
-        self.base = 0 # perlin noise base, to be randomized
-
-        if self.scale == 1.0: # this causes terrain heights of all zero to be returned, for some reason
-            self.scale = 1.01
+        self.block_length_range = self.row_width/2. # the mean is set to the same as row_width. 
+        self.ramp_distance = self.terrain_height * 4
 
         # heightmap parameters
         self.length = 1.25 # assumes square 
@@ -210,13 +190,11 @@ class AliengoHills(gym.Env):
         
         self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
         self.fake_plane = self.fake_client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        self._create_hills()
+        self._create_steps()
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                         max_torque=self.max_torque, 
                                         kp=self.kp, 
                                         kd=self.kd)
-
-
         
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,0.48], 
@@ -228,82 +206,47 @@ class AliengoHills(gym.Env):
         self._update_state()
         
         return self.state
+
+
+    def _create_steps(self):
+        '''Creates an identical steps terrain in client and fake client'''
         
-    
-
-
-    def _create_hills(self):
-        '''Creates an identical hills mesh using Perlin noise. Added to client and fake client'''
         
-        mesh_length = self.hills_length * self.mesh_res
-        mesh_width = self.hills_width * self.mesh_res
+        # pick a list of discrete values for heights to only generate a finite number of collision shapes
+        n_shapes = 10
+        height_values = np.linspace(-self.terrain_height_range/2., self.terrain_height_range/2., n_shapes)
+        length_values = np.linspace(self.row_width - self.block_length_range/2.,
+                                    self.row_width + self.block_length_range/2.,
+                                    n_shapes)      
+        shapeId = np.zeros(n_shapes, dtype=np.int)
+        fake_shapeId = np.zeros(n_shapes, dtype=np.int)
+        for i in range(len(length_values)):
+            halfExtents=[length_values[i]/2., self.row_width/2., self.terrain_height/2.] 
+            shapeId[i] = self.client.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
+            fake_shapeId[i] = self.fake_client.createCollisionShape(p.GEOM_BOX, halfExtents=halfExtents)
 
-        vertices = np.zeros((mesh_length + 1, mesh_width + 1))
-        self.base = np.random.randint(300)
-        for i in range(mesh_length + 1):
-            for j in range(mesh_width + 1):
-                vertices[i, j] = pnoise2(float(i)/(self.scale),
-                                            float(j)/(self.scale),
-                                            octaves=self.octaves,
-                                            persistence=self.persistence,
-                                            lacunarity=self.lacunarity,
-                                            repeatx=mesh_length + 1,
-                                            repeaty=mesh_width + 1,
-                                            base=self.base) # base is the seed
-        # Uncomment below to visualize image of terrain map                                            
-        # from PIL import Image
-        # Image.fromarray(((np.interp(vertices, (vertices.min(), vertices.max()), (0, 255.0))>128)*255).astype('uint8'), 'L').show()
-        vertices = np.interp(vertices, (vertices.min(), vertices.max()), (0, 1.0))
-
-
-        # ramp down n meters, so the robot can walk up onto the hills terrain
-        for i in range(int(self.ramp_distance * self.mesh_res)):
-            vertices[i, :] *= i/(self.ramp_distance * self.mesh_res)
-        vertices = vertices * self.hills_height # terrain height
-
-        with open(self.path,'w') as f:
-            f.write('o Generated_Hills_Terrain_' + str(self.env_terrain_id) + '\n')
-            # write vertices
-            for i in range(mesh_length + 1):
-                for j in range(mesh_width + 1):
-                    f.write('v  {}   {}   {}\n'.format(i, j, vertices[i, j]))
-
-            # write faces 
-            for i in range(mesh_length):
-                for j in range(mesh_width):
-                    # bottom left triangle
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+1, 
-                                                        (mesh_width + 1)*i + j+2, 
-                                                        (mesh_width + 1)*(i+1) + j+1)) 
-                    # top right triangle
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+2, 
-                                                        (mesh_width + 1)*(i+1) + j+1, 
-                                                        (mesh_width + 1)*i + j+2)) 
-                    # repeat, making faces double-sided
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+2, 
-                                                        (mesh_width + 1)*i + j+1, 
-                                                        (mesh_width + 1)*(i+1) + j+1)) 
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+1, 
-                                                        (mesh_width + 1)*(i+1) + j+2, 
-                                                        (mesh_width + 1)*i + j+2)) 
-        terrain = self.client.createCollisionShape(p.GEOM_MESH, 
-                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                                    fileName=self.path,
-                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
-        fake_terrain = self.fake_client.createCollisionShape(p.GEOM_MESH, 
-                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                                    fileName=self.path,
-                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+        for row in range(int(ceil(self.terrain_width/self.row_width))):
+            total_len = 0
+            while total_len < self.terrain_length:
+                i = np.random.randint(0, n_shapes)
+                j = np.random.randint(0, n_shapes)
+                if total_len < self.ramp_distance:
+                    offset = self.terrain_height * (1 - float(total_len)/self.ramp_distance)
+                else:
+                    offset = 0
+                pos = [total_len + length_values[i]/2. + 0.5, # X
+                        row * self.row_width - self.terrain_width/2. + self.row_width/2., # Y
+                        height_values[j] - offset + self.terrain_height/2.] # Z
+                self.client.createMultiBody(baseCollisionShapeIndex=shapeId[i], basePosition=pos)
+                self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_shapeId[i], basePosition=pos)
+                total_len += length_values[i]
+      
         
-        ori = self.client.getQuaternionFromEuler([0, 0, 0])
-        pos = [0.5 , -self.hills_width/2, 0]
-        self.client.createMultiBody(baseCollisionShapeIndex=terrain, baseOrientation=ori, basePosition=pos)
-        self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_terrain, baseOrientation=ori, basePosition=pos)
-
-    
+     
     def _get_heightmap(self):
         '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
-        Uses the "fake_client" simulation instance in order to avoid robot collisions'''
+        Uses the "fake_client" simulation instance in order to avoid robot collisions
+        TODO put this into the aliengo class'''
 
         debug = False
         show_xy = False
@@ -325,7 +268,8 @@ class AliengoHills(gym.Env):
         coordinates[1,:,:] += base_y  
         # coordinates has shape (2, self.grid_len, self.grid_len)
         coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
-        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * self.hills_height, axis=1) #TODO check that this and in general the values are working properly
+        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * \
+                                                    (self.terrain_height + self.terrain_height_range/2. + 1.), axis=1)
         ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
         raw_output = self.fake_client.rayTestBatch(ray_start, ray_end) 
         z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
@@ -344,10 +288,10 @@ class AliengoHills(gym.Env):
                     else:
                         text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
                     _id = self.client.addUserDebugText(text=text,
-                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
+                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.terrain_height+0.5],
                                             textColorRGB=[0,0,0])
                     self._debug_ids.append(_id)
-                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
+                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.terrain_height+0.5],
                                             [coordinates[0,i,j], coordinates[1,i,j], 0],
                                             lineColorRGB=[0,0,0] )
                     self._debug_ids.append(_id)
@@ -444,7 +388,7 @@ class AliengoHills(gym.Env):
                                         np.zeros(4), # foot normal forces
                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
                                         -1e5 * np.ones(3), # angular velocity (arbitrary bound)
-                                        -np.ones(self.grid_len**2) * (self.hills_height + 5))) # 5 is a safe arbitrary value 
+                                        -np.ones(self.grid_len**2) * (self.terrain_height + 5))) # 5 is a safe arbitrary value 
 
         observation_ub = np.concatenate((torque_ub, 
                                         position_ub, 
@@ -453,7 +397,7 @@ class AliengoHills(gym.Env):
                                         1e4 * np.ones(4), # arbitrary bound
                                         1e5 * np.ones(3),
                                         1e5 * np.ones(3),
-                                        np.ones(self.grid_len**2) * (self.hills_height + 5)))
+                                        np.ones(self.grid_len**2) * (self.terrain_height + 5)))
 
 
         return observation_lb, observation_ub
@@ -474,12 +418,14 @@ class AliengoHills(gym.Env):
         info = {}
 
         base_z_position = self.base_position[2]
-        height_out_of_bounds = ((base_z_position < 0.1) or (base_z_position > 0.9 + self.hills_height))
+        height_out_of_bounds = ((base_z_position < 0.1) or \
+                                (base_z_position > 0.8 + self.terrain_height + self.terrain_height_range/2.))
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
-                    (self.base_position[0] >= self.hills_length - 0.5) # don't want it to fall off the end.
+                    (self.base_position[0] >= self.terrain_length - 1.0)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
         flipping = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78*2.5, 1e10]).any())
-        y_out_of_bounds = not (-self.hills_width/2. < self.base_position[1] < self.hills_width/2.)
+        y_out_of_bounds = not (-self.terrain_width/2. < self.base_position[1] < self.terrain_width/2.)
+
 
         if flipping:
             info['termination_reason'] = 'flipping'
@@ -526,13 +472,13 @@ if __name__ == '__main__':
     client for visual verification that the two are identical. Then the script just keeps generating random terrains 
     for viewing. '''
 
-    env = gym.make('gym_aliengo:AliengoHills-v0', render=True, realTime=True)
+    env = gym.make('gym_aliengo:AliengoSteps-v0', render=True, realTime=True)
     imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
     imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
 
     
     while True:
         env.reset()
-        time.sleep(1.0)
+        time.sleep(5.0)
 
 

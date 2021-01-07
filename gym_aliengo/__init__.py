@@ -16,6 +16,11 @@ register(
     entry_point='gym_aliengo.envs:AliengoHills',
 )
 
+register(
+    id='AliengoSteps-v0',
+    entry_point='gym_aliengo.envs:AliengoSteps',
+)
+
 
 # register(
 #     id='MinitaurBulletEnv_PathFollow-v0',
