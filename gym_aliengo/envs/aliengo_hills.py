@@ -18,6 +18,8 @@ Env for rolling hills, meant to replicate the Hills env used in this paper:
 https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 TODO: find a better way to save terrain files so that they don't conflict, rather than assigning a random number to 
 each name. OR find a way to not have to save the .obj file at all.
+- Additionally, add a way to clear out the generated terrain .obj files after I'm doing training...not sure if possible 
+to add that from the env code.
 '''
 class AliengoHills(gym.Env):
     def __init__(self, render=False, realTime=False,
@@ -253,7 +255,9 @@ class AliengoHills(gym.Env):
         for i in range(int(self.ramp_distance * self.mesh_res)):
             vertices[i, :] *= i/(self.ramp_distance * self.mesh_res)
         vertices = vertices * self.hills_height # terrain height
-        with open('../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj','w') as f:
+
+        path = os.path.join(os.path.dirname(__file__),'../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
+        with open(path,'w') as f:
             f.write('o Generated_Hills_Terrain_' + str(self.env_terrain_id) + '\n')
             # write vertices
             for i in range(mesh_length + 1):
@@ -280,13 +284,13 @@ class AliengoHills(gym.Env):
                                                         (mesh_width + 1)*i + j+2)) 
 
         terrain = self.client.createCollisionShape(p.GEOM_MESH, 
-                                            meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                            fileName='../meshes/generated_hills' + str(self.env_terrain_id) + '.obj',
-                                            flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
+                                                    fileName=path,
+                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
         fake_terrain = self.fake_client.createCollisionShape(p.GEOM_MESH, 
-                                            meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                            fileName='../meshes/generated_hills' + str(self.env_terrain_id) + '.obj',
-                                            flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
+                                                    fileName=path,
+                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
         
         ori = self.client.getQuaternionFromEuler([0, 0, 0])
         pos = [0.5 , -self.hills_width/2, 0]
