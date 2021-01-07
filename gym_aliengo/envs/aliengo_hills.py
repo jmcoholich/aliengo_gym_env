@@ -16,10 +16,6 @@ from random import randint
 '''
 Env for rolling hills, meant to replicate the Hills env used in this paper: 
 https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
-TODO: find a better way to save terrain files so that they don't conflict, rather than assigning a random number to 
-each name. OR find a way to not have to save the .obj file at all.
-- Additionally, add a way to clear out the generated terrain .obj files after I'm doing training...not sure if possible 
-to add that from the env code.
 '''
 class AliengoHills(gym.Env):
     def __init__(self, render=False, realTime=False,
@@ -39,7 +35,7 @@ class AliengoHills(gym.Env):
 
         # Hills parameters, all units in meters
         self.hills_height = amplitude
-        self.mesh_res = 10 # int, points/meter
+        self.mesh_res = 3 # int, points/meter
         self.hills_length = 50
         self.hills_width = 3
         self.ramp_distance = 1.0
@@ -50,6 +46,10 @@ class AliengoHills(gym.Env):
         self.env_terrain_id = randint(0, 1e18) 
         self.path = os.path.join(os.path.dirname(__file__),
                                     '../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
+        # self.vhacd_path = os.path.join(os.path.dirname(__file__),
+        #                             '../meshes/VHACD_generated_hills_' + str(self.env_terrain_id) + '.obj')
+        # self.log_path = os.path.join(os.path.dirname(__file__),
+        #                             '../meshes/log_VHACD_generated_hills_' + str(self.env_terrain_id) + '.txt')
 
         
 
@@ -215,9 +215,11 @@ class AliengoHills(gym.Env):
                                         max_torque=self.max_torque, 
                                         kp=self.kp, 
                                         kd=self.kd)
+        # for link in self.quadruped.foot_links:
+        #     self.client.changeDynamics(self.quadruped.quadruped, link, contactStiffness=1e7, contactDamping=1e7)
+        #     print('stiffness:',self.client.getDynamicsInfo(self.quadruped.quadruped, link)[9], 
+        #             'damping:', self.client.getDynamicsInfo(self.quadruped.quadruped, link)[8])
 
-
-        
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,0.48], 
                                             ornObj=[0,0,0,1.0]) 
@@ -286,6 +288,7 @@ class AliengoHills(gym.Env):
                     f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+1, 
                                                         (mesh_width + 1)*(i+1) + j+2, 
                                                         (mesh_width + 1)*i + j+2)) 
+        # self.client.vhacd(self.path, self.vhacd_path, self.log_path)                          
         terrain = self.client.createCollisionShape(p.GEOM_MESH, 
                                                     meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
                                                     fileName=self.path,
@@ -299,6 +302,14 @@ class AliengoHills(gym.Env):
         pos = [0.5 , -self.hills_width/2, 0]
         self.client.createMultiBody(baseCollisionShapeIndex=terrain, baseOrientation=ori, basePosition=pos)
         self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_terrain, baseOrientation=ori, basePosition=pos)
+
+        
+        
+        # print('stiffness:',self.client.getDynamicsInfo(self.plane, -1)[9], 
+        #         'damping:', self.client.getDynamicsInfo(self.plane, -1)[8])
+        # print('stiffness:',self.client.getDynamicsInfo(terrain, -1)[9], 
+        #         'damping:', self.client.getDynamicsInfo(terrain, -1)[8])
+
 
     
     def _get_heightmap(self):
@@ -530,7 +541,6 @@ if __name__ == '__main__':
     imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
     imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
 
-    
     while True:
         env.reset()
         time.sleep(1.0)
