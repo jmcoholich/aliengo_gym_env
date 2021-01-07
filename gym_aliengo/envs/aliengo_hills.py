@@ -11,7 +11,7 @@ from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
 from pybullet_utils import bullet_client as bc
 from noise import pnoise2
-
+from random import randint
 
 '''
 Env for rolling hills, meant to replicate the Hills env used in this paper: 
@@ -45,7 +45,12 @@ class AliengoHills(gym.Env):
         self.ramp_distance = 1.0
 
         # this is a random id appened to terrain file name, so that each env instance doesn't overwrite another one.
-        self.env_terrain_id = np.random.randint(1e18)  
+        # use randint for filenames, since the np random seed is set, all env instances will get the same random number,
+        #  causing them to all write to the same file.
+        self.env_terrain_id = randint(0, 1e18) 
+        self.path = os.path.join(os.path.dirname(__file__),
+                                    '../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
+
         
 
         # Perlin Noise parameters
@@ -256,8 +261,7 @@ class AliengoHills(gym.Env):
             vertices[i, :] *= i/(self.ramp_distance * self.mesh_res)
         vertices = vertices * self.hills_height # terrain height
 
-        path = os.path.join(os.path.dirname(__file__),'../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
-        with open(path,'w') as f:
+        with open(self.path,'w') as f:
             f.write('o Generated_Hills_Terrain_' + str(self.env_terrain_id) + '\n')
             # write vertices
             for i in range(mesh_length + 1):
@@ -282,14 +286,14 @@ class AliengoHills(gym.Env):
                     f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+1, 
                                                         (mesh_width + 1)*(i+1) + j+2, 
                                                         (mesh_width + 1)*i + j+2)) 
-
+        print(self.path)
         terrain = self.client.createCollisionShape(p.GEOM_MESH, 
                                                     meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                                    fileName=path,
+                                                    fileName=self.path,
                                                     flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
         fake_terrain = self.fake_client.createCollisionShape(p.GEOM_MESH, 
                                                     meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                                    fileName=path,
+                                                    fileName=self.path,
                                                     flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
         
         ori = self.client.getQuaternionFromEuler([0, 0, 0])
@@ -471,7 +475,7 @@ class AliengoHills(gym.Env):
         info = {}
 
         base_z_position = self.base_position[2]
-        height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8))
+        height_out_of_bounds = ((base_z_position < 0.1) or (base_z_position > 0.9 + self.hills_height))
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
                     (self.base_position[0] >= self.hills_length + 1)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
