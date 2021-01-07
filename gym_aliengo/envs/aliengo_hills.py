@@ -19,8 +19,8 @@ https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 '''
 class AliengoHills(gym.Env):
     def __init__(self, render=False, realTime=False,
-                scale=0.5, # good values range from 5.0 (easy) to 0.5 (hard)
-                amplitude=1.0): # try [0.1, 1.0]
+                scale=1.0, # good values range from 5.0 (easy) to 0.5 (hard)
+                amplitude=0.75): # try [0.1, 1.0]
         
         # Environment Options
         self._apply_perturbations = False
@@ -41,14 +41,14 @@ class AliengoHills(gym.Env):
         self.ramp_distance = 1.0
 
         # Perlin Noise parameters
-        self.scale = self.mesh_res  * scale
+        self.scale = self.mesh_res * scale
         self.octaves = 1
-        self.persistence = 0.0 # roughness basically (assuming octaves > 1)
+        self.persistence = 0.0 # roughness basically (assuming octaves > 1). I'm not using this.
         self.lacunarity = 2.0
         self.base = 0 # perlin noise base, to be randomized
 
-        assert self.scale != 1.0 # this causes terrain of zero to be returned
-
+        if self.scale == 1.0: # this causes terrain heights of all zero to be returned, for some reason
+            self.scale = 1.01
 
         # heightmap parameters
         self.length = 1.25 # assumes square 
@@ -63,14 +63,13 @@ class AliengoHills(gym.Env):
         else:
             self.client = bc.BulletClient(connection_mode=p.DIRECT)
         self.fake_client = bc.BulletClient(connection_mode=p.DIRECT) # this is only used for getting the heightmap 
-        self.client.setPhysicsEngineParameter(enableFileCaching=0)
+
+        self.client.setPhysicsEngineParameter(enableFileCaching=0) # load the newly generated terrain every reset()
         self.fake_client.setPhysicsEngineParameter(enableFileCaching=0)
 
         if (self.client == -1) or (self.fake_client == -1):
             raise RuntimeError('Pybullet could not connect to physics client')
 
-
-    
         # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
         # cartesian base acceleration, base angular velocity
         self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 + self.grid_len**2
@@ -107,8 +106,6 @@ class AliengoHills(gym.Env):
             high=observation_ub,
             dtype=np.float32
             )
-        
-
 
 
     def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
@@ -186,7 +183,7 @@ class AliengoHills(gym.Env):
             self.client.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
 
 
-    def reset(self): #TODO add stochasticity
+    def reset(self):
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
@@ -225,8 +222,6 @@ class AliengoHills(gym.Env):
     def _create_hills(self):
         '''Creates an identical hills mesh using Perlin noise. Added to client and fake client'''
         
-        # if os.path.exists('__pycache__'):
-        #     rmtree('__pycache__')
         mesh_length = self.hills_length * self.mesh_res
         mesh_width = self.hills_width * self.mesh_res
 
@@ -242,12 +237,13 @@ class AliengoHills(gym.Env):
                                             repeatx=mesh_length + 1,
                                             repeaty=mesh_width + 1,
                                             base=self.base) # base is the seed
+        # Uncomment below to visualize image of terrain map                                            
         # from PIL import Image
         # Image.fromarray(((np.interp(vertices, (vertices.min(), vertices.max()), (0, 255.0))>128)*255).astype('uint8'), 'L').show()
         vertices = np.interp(vertices, (vertices.min(), vertices.max()), (0, 1.0))
 
 
-        # ramp down the n meters, so the robot can walk onto the hills terrain
+        # ramp down n meters, so the robot can walk up onto the hills terrain
         for i in range(int(self.ramp_distance * self.mesh_res)):
             vertices[i, :] *= i/(self.ramp_distance * self.mesh_res)
         vertices = vertices * self.hills_height # terrain height
@@ -278,13 +274,6 @@ class AliengoHills(gym.Env):
                                                         (mesh_width + 1)*(i+1) + j+2, 
                                                         (mesh_width + 1)*i + j+2)) 
 
-        with open('../meshes/generated_hills.obj', 'r') as f:
-            counter = 0
-            for line in f:
-                counter +=1
-                if counter == 748:
-                    break
-            print(line)
         terrain = self.client.createCollisionShape(p.GEOM_MESH, 
                                                     meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
                                                     fileName='../meshes/generated_hills.obj',
@@ -298,8 +287,6 @@ class AliengoHills(gym.Env):
         pos = [0.5 , -self.hills_width/2, 0]
         self.client.createMultiBody(baseCollisionShapeIndex=terrain, baseOrientation=ori, basePosition=pos)
         self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_terrain, baseOrientation=ori, basePosition=pos)
-
-
 
     
     def _get_heightmap(self):
@@ -465,8 +452,7 @@ class AliengoHills(gym.Env):
 
         base_x_velocity = self.base_twist[0]
         torque_penalty = np.power(self.applied_torques, 2).mean()
-        finish_bonus = (self.base_position[0] >= self.course_length + 2) * 200 
-        return base_x_velocity - 0.000005 * torque_penalty + finish_bonus
+        return base_x_velocity - 0.000005 * torque_penalty
 
 
 
@@ -475,22 +461,21 @@ class AliengoHills(gym.Env):
 
         info = {}
 
-        fell = self.base_position[2] <= (self.hills_height - self.stone_height_range/2.0)
-        reached_goal = (self.base_position[0] >= self.course_length + 2)
-        timeout = (self.eps_step_counter >= self.eps_timeout)
+        base_z_position = self.base_position[2]
+        height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8))
+        timeout = (self.eps_step_counter >= self.eps_timeout) or 
+                    (self.base_position[0] >= self.hills_length + 1)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
         flipping = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78*2.5, 1e10]).any())
 
         if flipping:
             info['termination_reason'] = 'flipping'
-        elif fell:
-            info['termination_reason'] = 'fell'
-        elif reached_goal:
-            info['termination_reason'] = 'reached_goal'
+        elif height_out_of_bounds:
+            info['termination_reason'] = 'height_out_of_bounds'
         elif timeout: # {'TimeLimit.truncated': True}
             info['TimeLimit.truncated'] = True
 
-        return any([fell, reached_goal, timeout, flipping]), info
+        return any([flipping, height_out_of_bounds, timeout]), info
 
 
     def _update_state(self):
@@ -523,15 +508,13 @@ class AliengoHills(gym.Env):
 
 if __name__ == '__main__':
     '''This test open the simulation in GUI mode for viewing the generated terrain, then saves a rendered image of each
-    client for visual verification that the two are identical. There are two resets to ensure that the deletion and 
-    addition of terrain elements is working properly. '''
-    # imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
-    # imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
+    client for visual verification that the two are identical. Then the script just keeps generating random terrains 
+    for viewing. '''
 
-    # sys.dont_write_bytecode = True
     env = gym.make('gym_aliengo:AliengoHills-v0', render=True, realTime=True)
-    # for _ in range(1):
-    #     env.reset()
+    imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
+    imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
+
     
     while True:
         env.reset()
