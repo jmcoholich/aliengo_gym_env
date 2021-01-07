@@ -463,7 +463,7 @@ class AliengoHills(gym.Env):
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8))
-        timeout = (self.eps_step_counter >= self.eps_timeout) or /
+        timeout = (self.eps_step_counter >= self.eps_timeout) or \
                     (self.base_position[0] >= self.hills_length + 1)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
         flipping = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78*2.5, 1e10]).any())
