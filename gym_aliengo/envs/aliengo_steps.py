@@ -38,7 +38,7 @@ class AliengoSteps(gym.Env):
         self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
         self.terrain_length = 50
         self.terrain_width = 3 
-        self.terrain_height = terrain_height_range + 0.05 # this is just the mean height of the blocks
+        self.terrain_height = terrain_height_range/2. + 0.05 # this is just the mean height of the blocks
 
         self.block_length_range = self.row_width/2. # the mean is set to the same as row_width. 
         self.ramp_distance = self.terrain_height * 4
@@ -210,7 +210,6 @@ class AliengoSteps(gym.Env):
 
     def _create_steps(self):
         '''Creates an identical steps terrain in client and fake client'''
-        
         
         # pick a list of discrete values for heights to only generate a finite number of collision shapes
         n_shapes = 10
@@ -411,21 +410,19 @@ class AliengoSteps(gym.Env):
         return base_x_velocity - 0.000005 * torque_penalty
 
 
-
     def _is_state_terminal(self) -> bool:
         ''' Calculates whether to end current episode due to failure based on current state. '''
 
         info = {}
 
         base_z_position = self.base_position[2]
-        height_out_of_bounds = ((base_z_position < 0.1) or \
+        height_out_of_bounds = ((base_z_position < 0.2) or \
                                 (base_z_position > 0.8 + self.terrain_height + self.terrain_height_range/2.))
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
                     (self.base_position[0] >= self.terrain_length - 1.0)
         # I don't care about how much the robot yaws for termination, only if its flipped on its back.
         flipping = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > [0.78*2, 0.78*2.5, 1e10]).any())
         y_out_of_bounds = not (-self.terrain_width/2. < self.base_position[1] < self.terrain_width/2.)
-
 
         if flipping:
             info['termination_reason'] = 'flipping'
