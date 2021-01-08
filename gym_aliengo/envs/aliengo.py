@@ -2,14 +2,6 @@
 Implements the class for the Aliengo robot to be used in all the environments in this repo. All inputs and outputs 
 should be numpy arrays.
 '''
-'''
-dev notes
-- The changed env should function the exact same as the original one. 
-    - test this by running the same policy on it and make sure it works. 
-    - also just run aliengo_env.py for the mocap test case. 
-***There is one major difference: This new implementation will return joint_positions as mapped from [-1, 1] even 
-for the observation***
-'''
 
 import pybullet as p
 import numpy as np
@@ -35,6 +27,73 @@ class Aliengo:
 
         self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
 
+
+    def render(self, mode, client): 
+        '''Returns RGB array of current scene if mode is 'rgb_array'.'''
+
+        RENDER_WIDTH = 480 
+        RENDER_HEIGHT = 360
+
+        # base_x_velocity = np.array(self.client.getBaseVelocity(self.quadruped)).flatten()[0]
+        # torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
+
+        # RENDER_WIDTH = 960 
+        # RENDER_HEIGHT = 720
+
+        # RENDER_WIDTH = 1920
+        # RENDER_HEIGHT = 1080
+
+        if mode == 'rgb_array':
+            base_pos, _ = self.client.getBasePositionAndOrientation(self.quadruped)
+            # base_pos = self.minitaur.GetBasePosition()
+            view_matrix = client.computeViewMatrixFromYawPitchRoll(
+                cameraTargetPosition=base_pos,
+                distance=2.0,
+                yaw=0,
+                pitch=-30.,
+                roll=0,
+                upAxisIndex=2)
+            proj_matrix = client.computeProjectionMatrixFOV(fov=60,
+                aspect=float(RENDER_WIDTH) /
+                RENDER_HEIGHT,
+                nearVal=0.1,
+                farVal=100.0)
+            _, _, px, _, _ = client.getCameraImage(width=RENDER_WIDTH,
+                height=RENDER_HEIGHT,
+                viewMatrix=view_matrix,
+                projectionMatrix=proj_matrix,
+                renderer=p.ER_BULLET_HARDWARE_OPENGL)
+            img = np.array(px)
+            img = img[:, :, :3]
+            # img = putText(np.float32(img), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            # img = putText(np.float32(img), 'Torque Penalty Term: ' + str(torque_pen)[:8], (1, 80), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            # img = putText(np.float32(img), 'Total Rew: ' + str(torque_pen + base_x_velocity)[:8], (1, 100), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            # foot_contacts = self._get_foot_contacts()
+            # for i in range(4):
+            #     if type(foot_contacts[i]) is list: # multiple contacts
+            #         assert False
+            #         num = np.array(foot_contacts[i]).round(2)
+            #     else:
+            #         num = round(foot_contacts[i], 2)
+            #     img = putText(np.float32(img), 
+            #                 ('Foot %d contacts: ' %(i+1)) + str(num), 
+            #                 (200, 60 + 20 * i), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            # img = putText(np.float32(img), 
+            #                 'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
+            #                 (200, 60 + 20 * 4), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            # img = putText(np.float32(img), 
+            #                 'Self Collision: ' + str(self.quadruped.self_collision()), 
+            #                 (200, 60 + 20 * 5), 
+            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
+            return np.uint8(img)
+
+        else: 
+            return
 
     def load_urdf(self):
         urdfFlags = p.URDF_USE_SELF_COLLISION
