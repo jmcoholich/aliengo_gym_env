@@ -9,7 +9,7 @@ import os
 import time
 
 class Aliengo:
-    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0):
+    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0, fixed=False):
         self.kp = kp
         self.kd = kd
         self.client = pybullet_client
@@ -17,7 +17,7 @@ class Aliengo:
         self.n_motors = 12
 
         self.foot_links = [5, 9, 13, 17]
-        self.quadruped = self.load_urdf()
+        self.quadruped = self.load_urdf(fixed=fixed)
 
     
         
@@ -29,6 +29,24 @@ class Aliengo:
 
 
         self._debug_ids = [] # this is for the visualization when debug = True
+
+    
+    def set_foot_positions(self, foot_positions):
+        '''Takes a numpy array of shape (4, 3) which represents foot xyz relative to the hip joint. Uses IK to 
+        calculate joint position targets and sets those targets. Does not return anything'''
+
+        # first do a simple test where I fix the mf in simulation and send a simple command
+        joint_positions = self.client.calculateInverseKinematics2(self.quadruped,
+                                                self.foot_links,
+                                                foot_positions,
+                                                maxNumIterations=1000,
+                                                residualThreshold=1e-10)
+        # print(joint_positions)
+        joint_positions = np.array(joint_positions)
+        self.set_joint_position_targets(joint_positions, true_positions=True)
+        # self.client.calculateInverseKinematics2(bodyUniqueId=self.quadruped,
+        #                                         endEffectorLinkIndices=self.foot_links,
+        #                                         targetPositions=targetPositions)
 
 
     def render(self, mode, client): 
@@ -217,13 +235,20 @@ class Aliengo:
         return contact
 
 
-    def load_urdf(self):
+    def load_urdf(self, fixed=False):
         urdfFlags = p.URDF_USE_SELF_COLLISION
-        quadruped= self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-                                    basePosition=[0,0, 0.48], 
-                                    baseOrientation=[0,0,0,1], 
-                                    flags = urdfFlags, 
-                                    useFixedBase=False)
+        if fixed:
+            quadruped= self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+                                        basePosition=[0,0, 1.00], 
+                                        baseOrientation=[0,0,0,1], 
+                                        flags = urdfFlags, 
+                                        useFixedBase=True)
+        else:
+            quadruped= self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
+                                        basePosition=[0,0, 0.48], 
+                                        baseOrientation=[0,0,0,1], 
+                                        flags = urdfFlags, 
+                                        useFixedBase=False)
 
         self.foot_links = [5, 9, 13, 17]
 
@@ -254,16 +279,17 @@ class Aliengo:
         points = self.client.getContactPoints(self.quadruped, self.quadruped)
         return len(points) > 0
 
-    def set_joint_position_targets(self, positions):
+    def set_joint_position_targets(self, positions, true_positions=False):
         '''
         Takes positions in range of [-1, 1]. These positions are mapped to the actual range of joint positions for 
         each joint of the robot. 
         '''
 
         assert isinstance(positions, np.ndarray)
-        assert ((-1.0 <= positions) & (positions <= 1.0)).all(), '\nposition received: ' + str(positions) + '\n'
- 
-        positions = self._actions_to_positions(positions)
+        
+        if not true_positions:
+            assert ((-1.0 <= positions) & (positions <= 1.0)).all(), '\nposition received: ' + str(positions) + '\n'
+            positions = self._actions_to_positions(positions)
 
         self.client.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
@@ -391,7 +417,23 @@ class Aliengo:
 
 
 
+if __name__ == '__main__':
+    # set up the quadruped in a pybullet simulation
+    from pybullet_utils import bullet_client as bc
+    client = client = bc.BulletClient(connection_mode=p.GUI)
+    client.setTimeStep(1/240.)
+    client.setGravity(0,0,-9.8)
+    client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
+    plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
+    quadruped = Aliengo(client, fixed=True)
+    quadruped.reset_joint_positions(stochastic=False)
+    time.sleep(1)
 
+    quadruped.set_foot_positions(np.array([[0.11,-0.1,0.65], [0.11,0.1,0.65], [-0.11,-0.1,0.65], [-0.11,0.1,0.65]]))
+    time.sleep(5)
+    actual_pos = [i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)]
+    print(actual_pos)
+    time.sleep(1000)
 
 
     

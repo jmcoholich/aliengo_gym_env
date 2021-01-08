@@ -1,52 +1,87 @@
-    def _get_heightmap(self):
-        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
-        Uses the "fake_client" simulation instance in order to avoid robot collisions'''
-
-        debug = False
-        show_xy = False
-
-        if self._debug_ids != []: # remove the exiting debug items
-            for _id in self._debug_ids:
-                self.client.removeUserDebugItem(_id)
-            self._debug_ids = []
-
-        base_x = self.base_position[0]
-        base_y = self.base_position[1]
-        base_z = self.base_position[2]
-
-
-        x = np.linspace(0, self.length, self.grid_len)
-        y = np.linspace(-self.length/2.0, self.length/2.0, self.grid_len)
-        coordinates = np.array(np.meshgrid(x,y))
-        coordinates[0,:,:] += base_x - self.robot_position
-        coordinates[1,:,:] += base_y  
-        # coordinates has shape (2, self.grid_len, self.grid_len)
-        coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
-        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * self.hills_height, axis=1) #TODO check that this and in general the values are working properly
-        ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
-        raw_output = self.fake_client.rayTestBatch(ray_start, ray_end) 
-        z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
-        relative_z_heights = z_heights - base_z
-
-        if debug:
-            # #print xy coordinates of robot origin 
-            # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
-            #             textPosition=[base_x, base_y,self.hills_height+1],
-            #             textColorRGB=[0,0,0])
-            # self._debug_ids.append(_id)
-            for i in range(self.grid_len):
-                for j in range(self.grid_len):
-                    if show_xy:
-                        text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((self.grid_len, self.grid_len))[i,j])
-                    else:
-                        text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
-                    _id = self.client.addUserDebugText(text=text,
-                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
-                                            textColorRGB=[0,0,0])
-                    self._debug_ids.append(_id)
-                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
-                                            [coordinates[0,i,j], coordinates[1,i,j], 0],
-                                            lineColorRGB=[0,0,0] )
-                    self._debug_ids.append(_id)
-        
-        return relative_z_heights.reshape((self.grid_len, self.grid_len))
+Jeremiah M. Coholich
+jcoholich@gatech.edu | (281) 794 - 7341 | linkedin.com/in/jeremiah-coholich/
+EDUCATION
+Ph.D. Robotics Expected May 2024
+Georgia Institute of Technology
+Bachelor of Science, Mechanical Engineering, Highest Honors May 2019
+The University of Texas at Austin
+Overall GPA: 3.98 / 4.0
+GRE Score: Verbal (169 / 170, 99th pctl), Quantitative (168 / 170, 93th pctl), Writing (5.0 / 6.0, 92nd pctl)
+Courses: Statistical Machine Learning (Matthieu Bloch), Nonlinear Controls (Ye-Hwa Chen), Linear Systems Theory
+(Erik Verriest), Introduction to Robotics Research (Sean Wilson)
+RESEARCH EXPERIENCE
+Ph.D. Student, Laboratory for Intelligent Decision and Autonomous Robots August 2019 – Present
+ Study nonlinear optimization of biped walking gaits on Cassie robot from Agility Robotics
+ Wrote program for hybrid trajectory optimization of five-link walker on soft terrain using MATLAB, FROST
+(developed by Ayonga Hereid), IPOPT, and Wolfram Mathematica
+ Operate Cassie robot and tune PD controller gains
+ Advise undergraduate team in creating upper-body robot and building Cassie test hardware
+ Coauthored conference paper on sensor-embedded Cassie foot prototype for terrain classification
+Research Assistant, Human Centered Robotics Lab February 2018 – May 2019
+ Implemented and debugged a model-based, multi-input controller with a disturbance observer and discrete-time
+filters for a series-elastic augmentation exoskeleton with a flexible cuff under the mentorship of a PhD student
+ Selected as one of 15 finalists out of 250 students at the Longhorn Research Poster Session for undergraduates
+ Designed and performed system ID experiments to determine the six parameter estimates for this exoskeleton
+ Designed and fabricated an adjustable-stiffness cuff flexure and a locking component for the exoskeleton
+ Modeled a 3-axis robotic joint in order to aid in placement of actuators and prevent issues with gimbal lock
+ Designed new linkage for robotic joint to increase accuracy of force control and decrease actuator load
+Research Assistant, Laboratory for Freeform Fabrication (Additive Manufacturing) July 2016 – August 2016
+ Conducted study on relationship between SLS machine laser energy density and part density and tensile strength
+ Ran lab operations including powder preparation and repair of delta-style FDM 3D printer
+INDUSTRY AND PROJECT EXPERIENCE
+Associate Engineer, SpaceX June 2019 – July 2019
+ Performed testing and troubleshooting for two Dragon 2 environmental seals including assembly of seals and test
+hardware, life cycling, TVAC, leak check, and SpaceX documentation
+ Redesigned another flight seal, held critical design review, procured seals, designed test hardware and procedure
+Intern, Harmonic Bionics (Rehabilitation Exoskeleton Startup) May 2018 – August 2018
+ Finalized design for six robotics linkages, including FEA, DFM, DFA, safety, aesthetics, wiring, and drawings
+ Designed spring counterbalance mechanism for 30 Nm robotic joint including geometry and torque calculations
+ Calculated torque requirements for seven robotic joints based on weight, moment of inertia, and external forces
+ Designed and machined stand for upper-body exoskeleton, including tipping and CG calculations plus packaging
+ Assisted with branding, shipping, and designing sales demo kits for proprietary EtherCAT devices
+Robotic Mechanisms and Testing Co-op, NASA JPL May 2017 – December 2017
+ Ran life testing and designed test equipment for percussion unit in the Mars 2020 Rover’s coring drill
+ Designed ground support equipment for percussion unit and other coring mechanisms and made drawings with
+GD&T
+ Assembled, disassembled, cleaned, and inspected percussion unit prototypes
+ Analyzed data from springs, percussion frequency, and force from throughout life testing
+Engineering Boot Camp, Bell Helicopter January 2017
+ Competed in team design challenge involving the Bell 429 Helicopter and presented solution to Bell Executive
+Leadership Team
+Team Captain, Longhorn Racing Electric FSAE Team May 2016 – June 2017
+ Built an electric, formula-style racecar for FSAE competition of June 2017
+ Managed 46 members divided into five different sub-teams
+ Worked on designs for frame, steering, battery mounting, ergonomics, and drivetrain
+ Presided over weekly team meetings and team workday
+ Personally secured over $7,000 worth of material and monetary donations
+Powertrain Team Lead, Business Team Lead, Longhorn Racing Electric FSAE Team August 2015 – May 2016
+ Restarted Formula Society of Automotive Engineers Electric Team at UT
+ Researched and designed electric powertrain with single motor, chain drive, and rear differential
+ Managed fundraising, corporate relationships, public relations, and efforts of business team members
+PUBLICATIONS
+Xiaofeng Guo, Bryan Blaise, Jennifer Molnar, Jeremiah Coholich, Shantanu Padte, Ye Zhao, and Frank L. Hammond III.
+“Soft Foot Sensor Design and Terrain Classification for Dynamic Legged Locomotion”. Accepted at IEEE International
+Conference on Soft Robotics 2020.
+Coholich, Jeremiah. “Flexure Design and Disturbance Observer for Strength Amplification Exoskeleton”. Poster
+presented at: Longhorn Research Poster Session, Austin, TX. 2019, Apr 17
+G. C. Thomas, J. M. Coholich, and L. Sentis, "Compliance Shaping for Control of Strength Amplification Exoskeletons
+with Elastic Cuffs," presented at The IEEE/ASME International Conference on Advanced Intelligent Mechatronics, Hong
+Kong, China, 2019
+David Bourell, Jeremiah Coholich, Antoine Chalancon, Abhimanyu Bhat. “Evaluation of energy density measures and
+validation for powder bed fusion of polyamide.” CIRP Annals Manufacturing Technology Vol. 1, 66 (Aug. 2017), pp.
+217-220.
+SKILLS
+ MATLAB, Python, ROS, Wolfram Mathematica, Ubuntu
+ SolidWorks and SolidWorks FEA, Siemens NX and Teamcenter and some NASTRAN (4 years)
+ Manual and CNC machining and fabrication experience (4 years)
+HONORS
+President’s Fellowship 2019 -2023
+ Internal “topper” fellowship awarded to top 10% of Georgia Tech Ph.D. applicant pool
+Phi Kappa Phi Chapter Excellence Award, UT nominee for national graduate Fellowship Spring 2019
+George W. Bean Endowed Presidential Scholarship 2016 – 2019
+Distinguished College Scholar 2016 – 2019
+ Awarded for ranking in top 4% of engineering class
+PROFESSIONAL SOCIETIES
+Kappa Theta Epsilon National Co-op Honor Society, Member 2018 – 2019
+ Excellent employer evaluations required for membership
+ Mentored first-year undergraduate students 
