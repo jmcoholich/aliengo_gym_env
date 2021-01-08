@@ -82,45 +82,6 @@ class AliengoEnv(gym.Env):
             )
 
 
-    def _is_non_foot_ground_contact(self):
-        """Detect if any parts of the robot, other than the feet, are touching the ground."""
-
-        raise NotImplementedError
-        contact = False
-        for i in range(self.num_joints):
-            if i in self.quadruped.foot_links: # the feet themselves are allow the touch the ground
-                continue
-            points = self.client.getContactPoints(self.quadruped.quadruped, self.plane, linkIndexA=i)
-            if len(points) != 0:
-                contact = True
-        return contact
-
-
-    def _get_foot_contacts(self):
-        '''Returns a numpy array of shape (4,) containing the normal forces on each foot with the ground. '''
-
-        contacts = [0] * 4
-        for i in range(len(self.quadruped.foot_links)):
-            info = self.client.getContactPoints(self.quadruped.quadruped, 
-                                                self.plane, 
-                                                linkIndexA=self.quadruped.foot_links[i])
-            if len(info) == 0: # leg does not contact ground
-                contacts[i] = 0 
-            elif len(info) == 1: # leg has one contact with ground
-                contacts[i] = info[0][9] # contact normal force
-            else: # use the contact point with the max normal force when there is more than one contact on a leg 
-                #TODO investigate scenarios with more than one contact point and maybe do something better (mean 
-                # or norm of contact forces?)
-                normals = [info[i][9] for i in range(len(info))] 
-                contacts[i] = max(normals)
-                # print('Number of contacts on one foot: %d' %len(info))
-                # print('Normal Forces: ', normals,'\n')
-        contacts = np.array(contacts)
-        if (contacts > 10_000).any():
-            warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
-        return contacts 
-
-
     def step(self, action):
         # action = np.clip(action, self.action_space.low, self.action_space.high)
         if not ((self.action_lb <= action) & (action <= self.action_ub)).all():
@@ -146,16 +107,6 @@ class AliengoEnv(gym.Env):
         return self.state, self.reward, done, info
 
         
-    def _apply_perturbation(self):
-        raise NotImplementedError
-        if np.random.rand() > 0.5: # apply force
-            force = tuple(10 * (np.random.rand(3) - 0.5))
-            self.client.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
-        else: # apply torque
-            torque = tuple(0.5 * (np.random.rand(3) - 0.5))
-            self.client.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
-
-
     def reset(self): #TODO add stochasticity to the initial starting state
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
@@ -241,7 +192,7 @@ class AliengoEnv(gym.Env):
         self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
         self.base_twist = self.quadruped.get_base_twist()
         self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
-        self.foot_normal_forces = self._get_foot_contacts()
+        self.foot_normal_forces = self.quadruped._get_foot_contacts()
         self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
                                     self.joint_velocities,

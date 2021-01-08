@@ -39,6 +39,14 @@ class AliengoHills(gym.Env):
         self.hills_length = 50
         self.hills_width = 3
         self.ramp_distance = 1.0
+        self.ray_start_height = self.hills_height + 1.0
+
+        # heightmap param dict
+        self.heightmap_params = {'length': 1.25, # assumes square 
+                            'robot_position': 0.5, # distance of robot base origin from back edge of height map
+                            'grid_spacing': 0.125}
+        assert self.heightmap_params['length'] % self.heightmap_params['grid_spacing'] == 0
+        self.grid_len = int(self.heightmap_params['length']/self.heightmap_params['grid_spacing']) + 1
 
         # this is a random id appened to terrain file name, so that each env instance doesn't overwrite another one.
         # use randint for filenames, since the np random seed is set, all env instances will get the same random number,
@@ -62,14 +70,6 @@ class AliengoHills(gym.Env):
 
         if self.scale == 1.0: # this causes terrain heights of all zero to be returned, for some reason
             self.scale = 1.01
-
-        # heightmap parameters
-        self.length = 1.25 # assumes square 
-        self.robot_position = 0.5 # distance of robot base origin from back edge of height map
-        self.grid_spacing = 0.125 
-        assert self.length%self.grid_spacing == 0
-        self.grid_len = int(self.length/self.grid_spacing) + 1
-
 
         if self._is_render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
@@ -101,7 +101,6 @@ class AliengoHills(gym.Env):
         self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
         self.eps_step_counter = 0 # Used for triggering timeout
         self.t = 0 # represents the actual time
-        self._debug_ids = []
 
         self.reset()
 
@@ -119,48 +118,6 @@ class AliengoHills(gym.Env):
             high=observation_ub,
             dtype=np.float32
             )
-
-
-    def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
-        """Detect if any parts of the robot, other than the feet, are touching the ground."""
-
-        raise NotImplementedError
-
-        contact = False
-        for i in range(self.num_joints):
-            if i in self.quadruped.foot_links: # the feet themselves are allow the touch the ground
-                continue
-            points = self.client.getContactPoints(self.quadruped.quadruped, self.plane, linkIndexA=i)
-            if len(points) != 0:
-                contact = True
-        return contact
-
-
-    def _get_foot_contacts(self): 
-        '''
-        Returns a numpy array of shape (4,) containing the normal forces on each foot with any object in simulation. 
-        '''
-
-        contacts = [0] * 4
-        for i in range(len(self.quadruped.foot_links)):
-            info = self.client.getContactPoints(bodyA=self.quadruped.quadruped,  
-                                        linkIndexA=self.quadruped.foot_links[i])
-            if len(info) == 0: # leg does not contact ground
-                contacts[i] = 0 
-            elif len(info) == 1: # leg has one contact with ground
-                contacts[i] = info[0][9] # contact normal force
-            else: # use the contact point with the max normal force when there is more than one contact on a leg 
-                #TODO investigate scenarios with more than one contact point and maybe do something better (mean 
-                # or norm of contact forces?)
-                normals = [info[i][9] for i in range(len(info))] 
-                contacts[i] = max(normals)
-                # print('Number of contacts on one foot: %d' %len(info))
-                # print('Normal Forces: ', normals,'\n')
-        contacts = np.array(contacts)
-        if (contacts > 10_000).any():
-            warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
-
-        return contacts 
 
 
     def step(self, action):
@@ -186,16 +143,6 @@ class AliengoHills(gym.Env):
         return self.state, self.reward, done, info
 
         
-    def _apply_perturbation(self):
-        raise NotImplementedError
-        if np.random.rand() > 0.5: # apply force
-            force = tuple(10 * (np.random.rand(3) - 0.5))
-            self.client.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
-        else: # apply torque
-            torque = tuple(0.5 * (np.random.rand(3) - 0.5))
-            self.client.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
-
-
     def reset(self):
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
@@ -308,60 +255,6 @@ class AliengoHills(gym.Env):
         # print('stiffness:',self.client.getDynamicsInfo(terrain, -1)[9], 
         #         'damping:', self.client.getDynamicsInfo(terrain, -1)[8])
 
-
-    
-    def _get_heightmap(self):
-        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
-        Uses the "fake_client" simulation instance in order to avoid robot collisions'''
-
-        debug = False
-        show_xy = False
-
-        if self._debug_ids != []: # remove the exiting debug items
-            for _id in self._debug_ids:
-                self.client.removeUserDebugItem(_id)
-            self._debug_ids = []
-
-        base_x = self.base_position[0]
-        base_y = self.base_position[1]
-        base_z = self.base_position[2]
-
-
-        x = np.linspace(0, self.length, self.grid_len)
-        y = np.linspace(-self.length/2.0, self.length/2.0, self.grid_len)
-        coordinates = np.array(np.meshgrid(x,y))
-        coordinates[0,:,:] += base_x - self.robot_position
-        coordinates[1,:,:] += base_y  
-        # coordinates has shape (2, self.grid_len, self.grid_len)
-        coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
-        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * self.hills_height, axis=1) #TODO check that this and in general the values are working properly
-        ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
-        raw_output = self.fake_client.rayTestBatch(ray_start, ray_end) 
-        z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
-        relative_z_heights = z_heights - base_z
-
-        if debug:
-            # #print xy coordinates of robot origin 
-            # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
-            #             textPosition=[base_x, base_y,self.hills_height+1],
-            #             textColorRGB=[0,0,0])
-            # self._debug_ids.append(_id)
-            for i in range(self.grid_len):
-                for j in range(self.grid_len):
-                    if show_xy:
-                        text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((self.grid_len, self.grid_len))[i,j])
-                    else:
-                        text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
-                    _id = self.client.addUserDebugText(text=text,
-                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
-                                            textColorRGB=[0,0,0])
-                    self._debug_ids.append(_id)
-                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.hills_height+0.5],
-                                            [coordinates[0,i,j], coordinates[1,i,j], 0],
-                                            lineColorRGB=[0,0,0] )
-                    self._debug_ids.append(_id)
-        
-        return relative_z_heights.reshape((self.grid_len, self.grid_len))
         
 
     def render(self, mode='human', client=None):
@@ -389,7 +282,7 @@ class AliengoHills(gym.Env):
                                         np.zeros(4), # foot normal forces
                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
                                         -1e5 * np.ones(3), # angular velocity (arbitrary bound)
-                                        -np.ones(self.grid_len**2) * (self.hills_height + 5))) # 5 is a safe arbitrary value 
+                                        -np.ones(self.grid_len**2) * self.ray_start_height)) # 5 is a safe arbitrary value 
 
         observation_ub = np.concatenate((torque_ub, 
                                         position_ub, 
@@ -398,7 +291,7 @@ class AliengoHills(gym.Env):
                                         1e4 * np.ones(4), # arbitrary bound
                                         1e5 * np.ones(3),
                                         1e5 * np.ones(3),
-                                        np.ones(self.grid_len**2) * (self.hills_height + 5)))
+                                        np.ones(self.grid_len**2) * self.ray_start_height))
 
 
         return observation_lb, observation_ub
@@ -447,7 +340,7 @@ class AliengoHills(gym.Env):
 
         self.t = self.eps_step_counter * self.n_hold_frames / 240.
 
-        self.foot_normal_forces = self._get_foot_contacts()
+        self.foot_normal_forces = self.quadruped._get_foot_contacts()
         
         self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
@@ -456,7 +349,10 @@ class AliengoHills(gym.Env):
                                     self.foot_normal_forces,
                                     self.cartesian_base_accel,
                                     self.base_twist[3:], # base angular velocity
-                                    self._get_heightmap().flatten())) 
+                                    self.quadruped._get_heightmap(self.fake_client, 
+                                                                    self.ray_start_height, 
+                                                                    self.base_position,
+                                                                    self.heightmap_params).flatten())) 
         
         if np.isnan(self.state).any():
             print('nans in state')

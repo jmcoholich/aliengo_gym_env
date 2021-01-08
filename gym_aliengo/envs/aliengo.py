@@ -6,6 +6,7 @@ should be numpy arrays.
 import pybullet as p
 import numpy as np
 import os
+import time
 
 class Aliengo:
     def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0):
@@ -24,8 +25,10 @@ class Aliengo:
         # in the URDF
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] 
        
-
         self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
+
+
+        self._debug_ids = [] # this is for the visualization when debug = True
 
 
     def render(self, mode, client): 
@@ -94,6 +97,125 @@ class Aliengo:
 
         else: 
             return
+
+
+    def _apply_perturbation(self):
+        raise NotImplementedError
+        if np.random.rand() > 0.5: # apply force
+            force = tuple(10 * (np.random.rand(3) - 0.5))
+            self.client.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
+        else: # apply torque
+            torque = tuple(0.5 * (np.random.rand(3) - 0.5))
+            self.client.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
+    
+
+    def _get_foot_contacts(self, _object=None): 
+        '''
+        Returns a numpy array of shape (4,) containing the normal forces on each foot with the object given. If 
+        no object given, just checks with any object in self.client simulation. 
+        '''
+
+        contacts = [0] * 4
+        for i in range(len(self.foot_links)):
+            if _object is None:
+                info = self.client.getContactPoints(bodyA=self.quadruped, 
+                                                    linkIndexA=self.foot_links[i])
+            else:
+                info = self.client.getContactPoints(bodyA=self.quadruped, 
+                                                    bodyB=_object,
+                                                    linkIndexA=self.foot_links[i])
+            if len(info) == 0: # leg does not contact ground
+                contacts[i] = 0 
+            elif len(info) == 1: # leg has one contact with ground
+                contacts[i] = info[0][9] # contact normal force
+            else: # use the contact point with the max normal force when there is more than one contact on a leg 
+                #TODO investigate scenarios with more than one contact point and maybe do something better (mean 
+                # or norm of contact forces?)
+                normals = [info[i][9] for i in range(len(info))] 
+                contacts[i] = max(normals)
+                # print('Number of contacts on one foot: %d' %len(info))
+                # print('Normal Forces: ', normals,'\n')
+        contacts = np.array(contacts)
+        if (contacts > 10_000).any():
+            warnings.warn("Foot contact force of %.2f over 10,000 (maximum of observation space)" %max(contacts))
+        return contacts 
+
+
+    def _get_heightmap(self, client, ray_start_height, base_position, heightmap_params):
+        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
+        Uses the "fake_client" simulation instance in order to avoid measuring the robot instead of terrain
+        ray_start_height should be a value that is guranteed to be above any terrain we want to measure. 
+        It is also where the debug text will be displayed when debug=True.'''
+
+        length = heightmap_params['length']
+        robot_position = heightmap_params['robot_position']
+        grid_spacing = heightmap_params['grid_spacing']
+        assert length % grid_spacing == 0
+        grid_len = int(length/grid_spacing) + 1
+
+        debug = False
+        show_xy = False
+
+        if self._debug_ids != []: # remove the exiting debug items
+            for _id in self._debug_ids:
+                self.client.removeUserDebugItem(_id)
+            self._debug_ids = []
+
+        base_x = base_position[0] 
+        base_y = base_position[1]
+        base_z = base_position[2]
+
+
+        x = np.linspace(0, length, grid_len)
+        y = np.linspace(-length/2.0, length/2.0, grid_len)
+        coordinates = np.array(np.meshgrid(x,y))
+        coordinates[0,:,:] += base_x - robot_position
+        coordinates[1,:,:] += base_y  
+        # coordinates has shape (2, grid_len, grid_len)
+        coor_list = coordinates.reshape((2, grid_len**2)).swapaxes(0, 1) # is now shape (grid_len**2,2) 
+        ray_start = np.append(coor_list, np.ones((grid_len**2, 1)) * ray_start_height, axis=1) #TODO check that this and in general the values are working properly
+        ray_end = np.append(coor_list, np.zeros((grid_len**2, 1)) - 1, axis=1)
+        raw_output = client.rayTestBatch(ray_start, ray_end) 
+        z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
+        relative_z_heights = z_heights - base_z
+
+        if debug:
+            # #print xy coordinates of robot origin 
+            # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
+            #             textPosition=[base_x, base_y,ray_start_height+1],
+            #             textColorRGB=[0,0,0])
+            # self._debug_ids.append(_id)
+            for i in range(grid_len):
+                for j in range(grid_len):
+                    if show_xy:
+                        text = '%.3f, %.3f, %.3f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j])
+                    else:
+                        text = '%.3f'%(z_heights.reshape((grid_len, grid_len))[i,j])
+                    _id = self.client.addUserDebugText(text=text,
+                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],ray_start_height+0.5],
+                                            textColorRGB=[0,0,0])
+                    self._debug_ids.append(_id)
+                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],ray_start_height+0.5],
+                                            [coordinates[0,i,j], coordinates[1,i,j], 0],
+                                            lineColorRGB=[0,0,0] )
+                    self._debug_ids.append(_id)
+
+        return relative_z_heights.reshape((grid_len, grid_len))
+
+
+    def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
+        """Detect if any parts of the robot, other than the feet, are touching the ground."""
+
+        raise NotImplementedError
+        contact = False
+        for i in range(self.num_joints):
+            if i in self.foot_links: # the feet themselves are allow the touch the ground
+                continue
+            points = self.client.getContactPoints(self.quadruped, self.plane, linkIndexA=i)
+            if len(points) != 0:
+                contact = True
+        return contact
+
 
     def load_urdf(self):
         urdfFlags = p.URDF_USE_SELF_COLLISION

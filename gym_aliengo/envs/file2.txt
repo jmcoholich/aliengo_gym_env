@@ -1,69 +1,54 @@
-    def render(self, mode='human', client=None):
-        '''default mode does nothing. 'rgb_array' returns image of env. '''
+    def _get_heightmap(self):
+        '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
+        Uses the "fake_client" simulation instance in order to avoid robot collisions
+        TODO put this into the aliengo class'''
 
-        if client is None: # for some reason I can't use self.client as a default value in the function definition line.
-            client = self.client 
+        debug = False
+        show_xy = False
 
-        RENDER_WIDTH = 480 
-        RENDER_HEIGHT = 360
+        if self._debug_ids != []: # remove the exiting debug items
+            for _id in self._debug_ids:
+                self.client.removeUserDebugItem(_id)
+            self._debug_ids = []
 
-        base_x_velocity = np.array(self.client.getBaseVelocity(self.quadruped.quadruped)).flatten()[0]
-        torque_pen = -0.00001 * np.power(self.applied_torques, 2).mean()
+        base_x = self.base_position[0]
+        base_y = self.base_position[1]
+        base_z = self.base_position[2]
 
-        # RENDER_WIDTH = 960 
-        # RENDER_HEIGHT = 720
 
-        # RENDER_WIDTH = 1920
-        # RENDER_HEIGHT = 1080
+        x = np.linspace(0, self.length, self.grid_len)
+        y = np.linspace(-self.length/2.0, self.length/2.0, self.grid_len)
+        coordinates = np.array(np.meshgrid(x,y))
+        coordinates[0,:,:] += base_x - self.robot_position
+        coordinates[1,:,:] += base_y  
+        # coordinates has shape (2, self.grid_len, self.grid_len)
+        coor_list = coordinates.reshape((2, self.grid_len**2)).swapaxes(0, 1) # is now shape (self.grid_len**2,2) 
+        ray_start = np.append(coor_list, np.ones((self.grid_len**2, 1)) * \
+                                                    (self.terrain_height + self.terrain_height_range/2. + 1.), axis=1)
+        ray_end = np.append(coor_list, np.zeros((self.grid_len**2, 1)) - 1, axis=1)
+        raw_output = self.fake_client.rayTestBatch(ray_start, ray_end) 
+        z_heights = np.array([raw_output[i][3][2] for i in range(self.grid_len**2)])
+        relative_z_heights = z_heights - base_z
 
-        if mode == 'rgb_array':
-            base_pos, _ = self.client.getBasePositionAndOrientation(self.quadruped.quadruped)
-            # base_pos = self.minitaur.GetBasePosition()
-            view_matrix = client.computeViewMatrixFromYawPitchRoll(
-                cameraTargetPosition=base_pos,
-                distance=2.0, 
-                yaw=0,
-                pitch=-30.,
-                roll=0,
-                upAxisIndex=2)
-            proj_matrix = client.computeProjectionMatrixFOV(fov=60,
-                aspect=float(RENDER_WIDTH) /
-                RENDER_HEIGHT,
-                nearVal=0.1,
-                farVal=100.0)
-            _, _, px, _, _ = client.getCameraImage(width=RENDER_WIDTH,
-                height=RENDER_HEIGHT,
-                viewMatrix=view_matrix,
-                projectionMatrix=proj_matrix,
-                renderer=p.ER_BULLET_HARDWARE_OPENGL)
-            img = np.array(px)
-            img = img[:, :, :3]
-            img = putText(np.float32(img), 'X-velocity:' + str(base_x_velocity)[:6], (1, 60), 
-                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            img = putText(np.float32(img), 'Torque Penalty Term: ' + str(torque_pen)[:8], (1, 80), 
-                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            img = putText(np.float32(img), 'Total Rew: ' + str(torque_pen + base_x_velocity)[:8], (1, 100), 
-                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            foot_contacts = self._get_foot_contacts()
-            for i in range(4):
-                if type(foot_contacts[i]) is list: # multiple contacts
-                    assert False
-                    num = np.array(foot_contacts[i]).round(2)
-                else:
-                    num = round(foot_contacts[i], 2)
-                img = putText(np.float32(img), 
-                            ('Foot %d contacts: ' %(i+1)) + str(num), 
-                            (200, 60 + 20 * i), 
-                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            # img = putText(np.float32(img), 
-            #                 'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
-            #                 (200, 60 + 20 * 4), 
-            #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            img = putText(np.float32(img), 
-                            'Self Collision: ' + str(self.quadruped.self_collision()), 
-                            (200, 60 + 20 * 5), 
-                            FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
-            return np.uint8(img)
-
-        else: 
-            return
+        if debug:
+            # #print xy coordinates of robot origin 
+            # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
+            #             textPosition=[base_x, base_y,self.hills_height+1],
+            #             textColorRGB=[0,0,0])
+            # self._debug_ids.append(_id)
+            for i in range(self.grid_len):
+                for j in range(self.grid_len):
+                    if show_xy:
+                        text = '%.2f, %.2f, %.2f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((self.grid_len, self.grid_len))[i,j])
+                    else:
+                        text = '%.2f'%(z_heights.reshape((self.grid_len, self.grid_len))[i,j])
+                    _id = self.client.addUserDebugText(text=text,
+                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],self.terrain_height+0.5],
+                                            textColorRGB=[0,0,0])
+                    self._debug_ids.append(_id)
+                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],self.terrain_height+0.5],
+                                            [coordinates[0,i,j], coordinates[1,i,j], 0],
+                                            lineColorRGB=[0,0,0] )
+                    self._debug_ids.append(_id)
+        
+        return relative_z_heights.reshape((self.grid_len, self.grid_len))
