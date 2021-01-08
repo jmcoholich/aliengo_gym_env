@@ -44,24 +44,21 @@ class Aliengo:
 
         debug=True # render/display things
 
-        # get hip joint positions
-        hip_positions = np.array([i[0] for i in self.client.getLinkStates(self.quadruped, self.hip_links)])
-        # calculate offsets from this in constructor so I can just add them to get joint positions.
-        
+        offsets = np.array(self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14])
+        base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
 
-        # first do a simple test where I fix the mf in simulation and send a simple command
-        joint_positions = self.client.calculateInverseKinematics2(self.quadruped,
+        # get current hip joint position
+        po, _ = self.client.multiplyTransforms(positionA=base_p,
+                                                orientationA=base_o,
+                                                positionB=offsets,
+                                                orientationB=[0.0, 0.0, 0.0, 1.0])
+       
+        joint_positions = np.array(self.client.calculateInverseKinematics2(self.quadruped,
                                                 self.foot_links,
                                                 foot_positions,
                                                 maxNumIterations=1000,
-                                                residualThreshold=1e-10)
-
-        # print(joint_positions)
-        joint_positions = np.array(joint_positions)
+                                                residualThreshold=1e-10))
         self.set_joint_position_targets(joint_positions, true_positions=True)
-        # self.client.calculateInverseKinematics2(bodyUniqueId=self.quadruped,
-        #                                         endEffectorLinkIndices=self.foot_links,
-        #                                         targetPositions=targetPositions)
 
         if debug:
             if self.first_debug:
@@ -76,12 +73,6 @@ class Aliengo:
                                                                     basePosition=foot_positions[i])
                 # visualize calculated hip positions
                 for i in range(4):
-                    offsets = np.array(self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14])
-                    base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
-                    po, _ = self.client.multiplyTransforms(positionA=base_p,
-                                                            orientationA=base_o,
-                                                            positionB=offsets,
-                                                            orientationB=[0.0, 0.0, 0.0, 1.0])
                     self.hip_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=ball, basePosition=po)
                 self.first_debug = False
             else:
@@ -89,12 +80,6 @@ class Aliengo:
                     self.client.resetBasePositionAndOrientation(self.foot_ball_ids[i], 
                                                                 posObj=foot_positions[i], 
                                                                 ornObj=[0,0,0,1])
-                    offsets = np.array(self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14])
-                    base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
-                    po, _ = self.client.multiplyTransforms(positionA=base_p,
-                                                            orientationA=base_o,
-                                                            positionB=offsets,
-                                                            orientationB=[0.0, 0.0, 0.0, 1.0])
                     self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
                                                                 posObj=po, 
                                                                 ornObj=[0,0,0,1])
