@@ -537,7 +537,7 @@ if __name__ == '__main__':
     client for visual verification that the two are identical. Then the script just keeps generating random terrains 
     for viewing. '''
 
-    env = gym.make('gym_aliengo:AliengoHills-v0', render=True, realTime=True)
+    env = gym.make('gym_aliengo:AliengoHills-v0', render=False, realTime=True)
     imwrite('client_render.png', cvtColor(env.render(client=env.client, mode='rgb_array'), COLOR_RGB2BGR))
     imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
 
