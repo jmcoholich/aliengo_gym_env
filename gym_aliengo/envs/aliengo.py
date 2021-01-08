@@ -9,7 +9,8 @@ import os
 import time
 
 class Aliengo:
-    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0, fixed=False):
+    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0, 
+                    fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0]):
         self.kp = kp
         self.kd = kd
         self.client = pybullet_client
@@ -17,23 +18,36 @@ class Aliengo:
         self.n_motors = 12
 
         self.foot_links = [5, 9, 13, 17]
-        self.quadruped = self.load_urdf(fixed=fixed)
+        self.hip_links =  [3, 7, 11, 15]
+        self.quadruped = self.load_urdf(fixed=fixed, fixed_position=fixed_position, fixed_orientation=fixed_orientation)
 
     
         
         # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL. The skipped numbers are fixed joints
         # in the URDF
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] 
-       
+        self.hip_joints = [2, 6, 10, 14]
+        self.thigh_joints = [3, 7, 11, 15]
+        self.knee_joints = [4, 8, 12, 16]
+        self.num_links = 19
         self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
 
 
-        self._debug_ids = [] # this is for the visualization when debug = True
+        self._debug_ids = [] # this is for the visualization when debug = True for heightmap
+
+        self.first_debug = True # this is for debug for set foot positions
 
     
     def set_foot_positions(self, foot_positions):
         '''Takes a numpy array of shape (4, 3) which represents foot xyz relative to the hip joint. Uses IK to 
         calculate joint position targets and sets those targets. Does not return anything'''
+
+        debug=True # render/display things
+
+        # get hip joint positions
+        hip_positions = np.array([i[0] for i in self.client.getLinkStates(self.quadruped, self.hip_links)])
+        # calculate offsets from this in constructor so I can just add them to get joint positions.
+        
 
         # first do a simple test where I fix the mf in simulation and send a simple command
         joint_positions = self.client.calculateInverseKinematics2(self.quadruped,
@@ -41,12 +55,52 @@ class Aliengo:
                                                 foot_positions,
                                                 maxNumIterations=1000,
                                                 residualThreshold=1e-10)
+
         # print(joint_positions)
         joint_positions = np.array(joint_positions)
         self.set_joint_position_targets(joint_positions, true_positions=True)
         # self.client.calculateInverseKinematics2(bodyUniqueId=self.quadruped,
         #                                         endEffectorLinkIndices=self.foot_links,
         #                                         targetPositions=targetPositions)
+
+        if debug:
+            if self.first_debug:
+                ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.02, rgbaColor=[255, 0, 0, 1.0])
+                for i in range(self.num_links):
+                    self.client.changeVisualShape(self.quadruped, i, rgbaColor=[0, 0, 0, 0.75])
+                # visualize commanded foot positions 
+                self.foot_ball_ids = [0]*4
+                self.hip_ball_ids = [0]*4
+                for i in range(4):
+                    self.foot_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=ball, 
+                                                                    basePosition=foot_positions[i])
+                # visualize calculated hip positions
+                for i in range(4):
+                    offsets = np.array(self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14])
+                    base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
+                    po, _ = self.client.multiplyTransforms(positionA=base_p,
+                                                            orientationA=base_o,
+                                                            positionB=offsets,
+                                                            orientationB=[0.0, 0.0, 0.0, 1.0])
+                    self.hip_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=ball, basePosition=po)
+                self.first_debug = False
+            else:
+                for i in range(4):
+                    self.client.resetBasePositionAndOrientation(self.foot_ball_ids[i], 
+                                                                posObj=foot_positions[i], 
+                                                                ornObj=[0,0,0,1])
+                    offsets = np.array(self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14])
+                    base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
+                    po, _ = self.client.multiplyTransforms(positionA=base_p,
+                                                            orientationA=base_o,
+                                                            positionB=offsets,
+                                                            orientationB=[0.0, 0.0, 0.0, 1.0])
+                    self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
+                                                                posObj=po, 
+                                                                ornObj=[0,0,0,1])
+            
+            
+
 
 
     def render(self, mode, client): 
@@ -235,12 +289,12 @@ class Aliengo:
         return contact
 
 
-    def load_urdf(self, fixed=False):
+    def load_urdf(self, fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0]):
         urdfFlags = p.URDF_USE_SELF_COLLISION
         if fixed:
             quadruped= self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/aliengo.urdf'),
-                                        basePosition=[0,0, 1.00], 
-                                        baseOrientation=[0,0,0,1], 
+                                        basePosition=fixed_position, 
+                                        baseOrientation=self.client.getQuaternionFromEuler(fixed_orientation), 
                                         flags = urdfFlags, 
                                         useFixedBase=True)
         else:
@@ -425,12 +479,12 @@ if __name__ == '__main__':
     client.setGravity(0,0,-9.8)
     client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-    quadruped = Aliengo(client, fixed=True)
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[np.pi/4. + 2*np.pi*100] * 3, fixed_position=[-1,1,1])
     quadruped.reset_joint_positions(stochastic=False)
     time.sleep(1)
-
-    quadruped.set_foot_positions(np.array([[0.11,-0.1,0.65], [0.11,0.1,0.65], [-0.11,-0.1,0.65], [-0.11,0.1,0.65]]))
-    time.sleep(5)
+    while True:
+        quadruped.set_foot_positions(np.array([[0.11,-0.1,0.65], [0.11,0.1,0.65], [-0.11,-0.1,0.65], [-0.11,0.1,0.65]]))
+        time.sleep(0.0001)
     actual_pos = [i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)]
     print(actual_pos)
     time.sleep(1000)
