@@ -46,7 +46,7 @@ class Aliengo:
         assert foot_positions.shape == (4,3)
         debug=True # render/display things
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
-        global_foot_positions = np.zeros((4, 3))
+        commanded_global_foot_positions = np.zeros((4, 3))
         for i in range(4):
             hip_offset_from_base = self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14]
             base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
@@ -56,17 +56,17 @@ class Aliengo:
                                                     orientationB=[0.0, 0.0, 0.0, 1.0]))
             # rotate the input foot_positions x and y from robot yaw direction to global coordinate frame 
             _, _, yaw = self.client.getEulerFromQuaternion(base_o)
-            global_foot_positions[i][0] = hip_joint_positions[i][0] + \
+            commanded_global_foot_positions[i][0] = hip_joint_positions[i][0] + \
                                                 foot_positions[i][0] * np.cos(yaw) + foot_positions[i][1] * np.sin(yaw)
-            global_foot_positions[i][1] = hip_joint_positions[i][1] + \
+            commanded_global_foot_positions[i][1] = hip_joint_positions[i][1] + \
                                                 foot_positions[i][0] * np.sin(yaw) + foot_positions[i][1] * np.cos(yaw)
-            global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2]
+            commanded_global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2] + 0.0265 # collision radius
         # print(yaw)
-        # print(global_foot_positions)
+        # print(commanded_global_foot_positions)
         # sys.exit()
         joint_positions = np.array(self.client.calculateInverseKinematics2(self.quadruped,
                                                 self.foot_links,
-                                                global_foot_positions) )
+                                                commanded_global_foot_positions))
                                                 # maxNumIterations=1000,
                                                 # residualThreshold=1e-10))
         self.set_joint_position_targets(joint_positions, true_positions=True)
@@ -83,7 +83,7 @@ class Aliengo:
                 self.hip_ball_ids = [0]*4
                 for i in range(4):
                     self.foot_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=commanded_ball, 
-                                                                    basePosition=global_foot_positions[i])
+                                                                    basePosition=commanded_global_foot_positions[i])
                 # visualize calculated hip positions
                 for i in range(4):
                     self.hip_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=actual_ball, 
@@ -92,7 +92,7 @@ class Aliengo:
             else:
                 for i in range(4):
                     self.client.resetBasePositionAndOrientation(self.foot_ball_ids[i], 
-                                                                posObj=global_foot_positions[i], 
+                                                                posObj=commanded_global_foot_positions[i], 
                                                                 ornObj=[0,0,0,1])
                     self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
                                                                 posObj=hip_joint_positions[i], 
@@ -469,19 +469,7 @@ class Aliengo:
                                     velocityGains=self.kd * np.ones(12))
 
 
-
-if __name__ == '__main__':
-    # set up the quadruped in a pybullet simulation
-    from pybullet_utils import bullet_client as bc
-    client = client = bc.BulletClient(connection_mode=p.GUI)
-    client.setTimeStep(1/240.)
-    client.setGravity(0,0,-9.8)
-    client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
-    plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-
-
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[-1,1,1])
-
+def sine_tracking_test(client, quadruped):
     # test foot position command tracking and print tracking error
     t = 0
     while True:
@@ -492,10 +480,27 @@ if __name__ == '__main__':
         time.sleep(1/240.)
         t += 1/240.
 
-        # calculate tracking error. First calculate the command in global coordinates
-        foot_positions = command
+        calculate_tracking_error(command, client, quadruped)
+
+
+def floor_tracking_test(client, quadruped):
+    # test foot position command tracking and print tracking error
+    t = 0
+    while True:
+        z = -0.500 # decreasing this to -0.51 should show feet collision with ground and inability to track
+        command = np.array([[0.1 * np.sin(2*t), 0, z] for _ in range(4)])
+        quadruped.set_foot_positions(command)
+        client.resetBasePositionAndOrientation(quadruped.quadruped,[0.,0.,0.5], [0.,0.,0.,1.0])
+        time.sleep(1/240.)
+        t += 1/240.
+
+        calculate_tracking_error(command, client, quadruped)
+
+        
+def calculate_tracking_error(foot_positions, client, quadruped):
+    # calculate tracking error. First calculate the command in global coordinates
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
-        global_foot_positions = np.zeros((4, 3))
+        commanded_global_foot_positions = np.zeros((4, 3))
         for i in range(4):
             hip_offset_from_base = client.getJointInfo(quadruped.quadruped, quadruped.hip_joints[i])[14]
             base_p, base_o = client.getBasePositionAndOrientation(quadruped.quadruped)
@@ -505,13 +510,28 @@ if __name__ == '__main__':
                                                     orientationB=[0.0, 0.0, 0.0, 1.0]))
             # rotate the input foot_positions x and y from robot yaw direction to global coordinate frame 
             _, _, yaw = client.getEulerFromQuaternion(base_o)
-            global_foot_positions[i][0] = hip_joint_positions[i][0] + \
+            commanded_global_foot_positions[i][0] = hip_joint_positions[i][0] + \
                                                 foot_positions[i][0] * np.cos(yaw) + foot_positions[i][1] * np.sin(yaw)
-            global_foot_positions[i][1] = hip_joint_positions[i][1] + \
+            commanded_global_foot_positions[i][1] = hip_joint_positions[i][1] + \
                                                 foot_positions[i][0] * np.sin(yaw) + foot_positions[i][1] * np.cos(yaw)
-            global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2]
+            commanded_global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2]
         actual_pos = np.array([i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)])
-        print('Maximum tracking error: {:e}'.format(np.abs((global_foot_positions- actual_pos)).max()))
+        print('Maximum tracking error: {:e}'.format(np.abs((commanded_global_foot_positions- actual_pos)).max()))
 
+
+if __name__ == '__main__':
+    # set up the quadruped in a pybullet simulation
+    from pybullet_utils import bullet_client as bc
+    client = client = bc.BulletClient(connection_mode=p.GUI)
+    client.setTimeStep(1/240.)
+    client.setGravity(0,0,-9.8)
+    client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
+    plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[-1,1,1])
+
+    # sine_tracking_test(client, quadruped)
+    floor_tracking_test(client, quadruped)
+
+    
 
     
