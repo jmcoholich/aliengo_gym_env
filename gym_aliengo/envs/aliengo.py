@@ -18,7 +18,9 @@ class Aliengo:
         self.n_motors = 12
 
         self.foot_links = [5, 9, 13, 17]
-        self.hip_links =  [3, 7, 11, 15]
+        self.shin_links = [4, 8, 12, 16]
+        self.thigh_links =  [3, 7, 11, 15]
+        self.hip_links = [2, 6, 10, 14]
         self.quadruped = self.load_urdf(fixed=fixed, fixed_position=fixed_position, fixed_orientation=fixed_orientation)
 
     
@@ -348,7 +350,7 @@ class Aliengo:
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
             targetPositions=positions,
-            forces=self.max_torque * np.ones(self.n_motors),
+            forces=self.max_torque * np.ones(self.n_motors)
             positionGains=self.kp * np.ones(self.n_motors),
             velocityGains=self.kd * np.ones(self.n_motors))
 
