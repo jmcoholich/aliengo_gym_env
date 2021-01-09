@@ -42,46 +42,60 @@ class Aliengo:
         '''Takes a numpy array of shape (4, 3) which represents foot xyz relative to the hip joint. Uses IK to 
         calculate joint position targets and sets those targets. Does not return anything'''
 
+
+        assert foot_positions.shape == (4,3)
         debug=True # render/display things
-
-        offsets = np.array(self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14])
-        base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
-
-        # get current hip joint position
-        po, _ = self.client.multiplyTransforms(positionA=base_p,
-                                                orientationA=base_o,
-                                                positionB=offsets,
-                                                orientationB=[0.0, 0.0, 0.0, 1.0])
-       
+        hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
+        global_foot_positions = np.zeros((4, 3))
+        for i in range(4):
+            hip_offset_from_base = self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14]
+            base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
+            hip_joint_positions[i], _ = np.array(self.client.multiplyTransforms(positionA=base_p,
+                                                    orientationA=base_o,
+                                                    positionB=hip_offset_from_base,
+                                                    orientationB=[0.0, 0.0, 0.0, 1.0]))
+            # rotate the input foot_positions x and y from robot yaw direction to global coordinate frame 
+            _, _, yaw = self.client.getEulerFromQuaternion(base_o)
+            global_foot_positions[i][0] = hip_joint_positions[i][0] + \
+                                                foot_positions[i][0] * np.cos(yaw) + foot_positions[i][1] * np.sin(yaw)
+            global_foot_positions[i][1] = hip_joint_positions[i][1] + \
+                                                foot_positions[i][0] * np.sin(yaw) + foot_positions[i][1] * np.cos(yaw)
+            global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2]
+        # print(yaw)
+        # print(global_foot_positions)
+        # sys.exit()
         joint_positions = np.array(self.client.calculateInverseKinematics2(self.quadruped,
                                                 self.foot_links,
-                                                foot_positions,
-                                                maxNumIterations=1000,
-                                                residualThreshold=1e-10))
+                                                global_foot_positions) )
+                                                # maxNumIterations=1000,
+                                                # residualThreshold=1e-10))
         self.set_joint_position_targets(joint_positions, true_positions=True)
 
         if debug:
+            # green spheres are commanded positions, red spheres are actual positions
             if self.first_debug:
-                ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.02, rgbaColor=[255, 0, 0, 1.0])
+                commanded_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.02, rgbaColor=[0, 100, 0, 1.0])
+                actual_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.02, rgbaColor=[255, 0, 0, 1.0])
                 for i in range(self.num_links):
                     self.client.changeVisualShape(self.quadruped, i, rgbaColor=[0, 0, 0, 0.75])
                 # visualize commanded foot positions 
                 self.foot_ball_ids = [0]*4
                 self.hip_ball_ids = [0]*4
                 for i in range(4):
-                    self.foot_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=ball, 
-                                                                    basePosition=foot_positions[i])
+                    self.foot_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=commanded_ball, 
+                                                                    basePosition=global_foot_positions[i])
                 # visualize calculated hip positions
                 for i in range(4):
-                    self.hip_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=ball, basePosition=po)
+                    self.hip_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=actual_ball, 
+                                                                        basePosition=hip_joint_positions[i])
                 self.first_debug = False
             else:
                 for i in range(4):
                     self.client.resetBasePositionAndOrientation(self.foot_ball_ids[i], 
-                                                                posObj=foot_positions[i], 
+                                                                posObj=global_foot_positions[i], 
                                                                 ornObj=[0,0,0,1])
                     self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
-                                                                posObj=po, 
+                                                                posObj=hip_joint_positions[i], 
                                                                 ornObj=[0,0,0,1])
             
             
@@ -464,15 +478,40 @@ if __name__ == '__main__':
     client.setGravity(0,0,-9.8)
     client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[np.pi/4. + 2*np.pi*100] * 3, fixed_position=[-1,1,1])
-    quadruped.reset_joint_positions(stochastic=False)
-    time.sleep(1)
+
+
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[-1,1,1])
+
+    # test foot position command tracking and print tracking error
+    t = 0
     while True:
-        quadruped.set_foot_positions(np.array([[0.11,-0.1,0.65], [0.11,0.1,0.65], [-0.11,-0.1,0.65], [-0.11,0.1,0.65]]))
-        time.sleep(0.0001)
-    actual_pos = [i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)]
-    print(actual_pos)
-    time.sleep(1000)
+        command = np.array([[0.1 * np.sin(2*t), -0.1 * np.sin(2*t), -0.3  + 0.1 * np.sin(2*t)] for _ in range(4)])
+        quadruped.set_foot_positions(command)
+        orientation = client.getQuaternionFromEuler([np.pi/4.*np.sin(t)]*3)
+        client.resetBasePositionAndOrientation(quadruped.quadruped,[-1,1,1], orientation)
+        time.sleep(1/240.)
+        t += 1/240.
+
+        # calculate tracking error. First calculate the command in global coordinates
+        foot_positions = command
+        hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
+        global_foot_positions = np.zeros((4, 3))
+        for i in range(4):
+            hip_offset_from_base = client.getJointInfo(quadruped.quadruped, quadruped.hip_joints[i])[14]
+            base_p, base_o = client.getBasePositionAndOrientation(quadruped.quadruped)
+            hip_joint_positions[i], _ = np.array(client.multiplyTransforms(positionA=base_p,
+                                                    orientationA=base_o,
+                                                    positionB=hip_offset_from_base,
+                                                    orientationB=[0.0, 0.0, 0.0, 1.0]))
+            # rotate the input foot_positions x and y from robot yaw direction to global coordinate frame 
+            _, _, yaw = client.getEulerFromQuaternion(base_o)
+            global_foot_positions[i][0] = hip_joint_positions[i][0] + \
+                                                foot_positions[i][0] * np.cos(yaw) + foot_positions[i][1] * np.sin(yaw)
+            global_foot_positions[i][1] = hip_joint_positions[i][1] + \
+                                                foot_positions[i][0] * np.sin(yaw) + foot_positions[i][1] * np.cos(yaw)
+            global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2]
+        actual_pos = np.array([i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)])
+        print('Maximum tracking error: {:e}'.format(np.abs((global_foot_positions- actual_pos)).max()))
 
 
     
