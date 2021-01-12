@@ -60,30 +60,20 @@ class Aliengo:
         assert t >= 0
         freqs = f0 * np.ones(4) + f
         periods = 1.0/freqs
-        phases = 2 * np.pi * (t % periods)/periods
+        phases = 2 * np.pi * (t % periods)/periods #TODO check this against the formula in the paper
         
-        ks = 2 * (phases - np.pi)/np.pi
-        pair1_targets = np.zeros(3) # the foot position targets for one pair of diagonal feet
-        pair2_targets = np.zeros(3) # foot position targets for the other pair
+        trot_phase_offsets = np.array([0, np.pi, np.pi, 0])
+        phases = (phases + trot_phase_offsets) % (2 * np.pi)
 
-        if -2 <= k < -1:
-            pair1_targets[2] = step_bottom
-            pair2_targets[2] = step_height * (-2*(k+2)*(k+2)*(k+2) + 3*(k+2)*(k+2)) + step_bottom
-        elif -1 <= k < 0:
-            pair1_targets[2] = step_bottom
-            pair2_targets[2] = step_height * (2*(k+2)*(k+2)*(k+2) - 9*(k+2)*(k+2) + 12*(k+2) - 4) + step_bottom
-        elif 0 <= k < 1:
-            pair1_targets[2] = step_height * (-2*k*k*k + 3*k*k) + step_bottom
-            pair2_targets[2] = step_bottom
-        elif 1 <= k < 2:
-            pair1_targets[2] = step_height * (2*k*k*k - 9*k*k + 12*k - 4) + step_bottom
-            pair2_targets[2] = step_bottom
-        else:
-            assert False
-        
+        phases2 = (trot_phase_offsets + (f0 + f) * t) % (2 * np.pi)
+        print(phases, phases2) # TODO debug this shid
+        assert (phases == phases2).all()
         foot_positions = np.zeros((4, 3))
-        foot_positions[[0,3]] = pair1_targets
-        foot_positions[[1,2]] = pair2_targets
+        for i in range(4):
+            z = step_height * self._foot_step_traj(phases[i]) + step_bottom
+            foot_positions[i] = np.array([0, 0, z])
+        
+
         foot_positions[[0,2], 1] = -lateral_offset
         foot_positions[[1,3], 1] = lateral_offset
         foot_positions[:,0] = x_offset
@@ -93,11 +83,11 @@ class Aliengo:
 
 
     def _foot_step_traj(self, phase):
-        '''Takes a phase parameter and outputs a value [0, 1]. This is according to this formula is S3 here, 
+        '''Takes a phase scalar and outputs a value [0, 1]. This is according to this formula is S3 here, 
         but normalized to [0, 1]:
         https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf'''
-
-        assert 0 <= phase < 2 * np.pi
+        
+        assert 0 <= phase < 2 * np.pi, 'phase must be in [0, 2 * pi)'
         k = 2 * (phase - np.pi)/np.pi
         if -2 <= k < 0:
             return 0
@@ -609,7 +599,7 @@ def trajectory_generator_test(client, quadruped):
     # quadruped.reset_joint_positions(stochastic=False)
     # time.sleep(2)
     while True:
-        command = quadruped.set_trajectory_parameters(t)
+        command = quadruped.set_trajectory_parameters(t, f=np.array([0 , 0, 10, 10]))
         time.sleep(1/240. * 1)
         if counter% 2 == 0:
             calculate_tracking_error(command, client, quadruped)
