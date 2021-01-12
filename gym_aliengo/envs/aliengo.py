@@ -39,14 +39,81 @@ class Aliengo:
 
         self.first_debug = True # this is for debug for set foot positions
 
+
+    def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3))):
+        '''Takes parameters of a trot trajectory (defined in this function), a phase variable, and target foot position
+        residuals. Calls set_foot_positions() to actuate robot. If only a cyclical phase is given and no foot position
+        residuals,the robot will step in place.'''
+
+        ''' TODO just input a time to this function, and I will calculate the phase. Frequency is a traj param, along with
+        freq offsets per leg. Make the inputs to this function be the action space of the policy. Then see if I can 
+        learn a flat ground policy. I think the policy just outputs fi's and residuals ''' 
+        
+
+        # other trajectory parameters
+        step_height = 0.2 # from paper
+        step_bottom = -0.5 # from paper
+        lateral_offset = 0.075 # how much to push the feet out 
+        x_offset = 0.02109375 # experimental, close to balance 
+        f0 = 1.25 # 1.25 is from paper
+
+        assert t >= 0
+        freqs = f0 * np.ones(4) + f
+        periods = 1.0/freqs
+        phases = 2 * np.pi * (t % periods)/periods
+        
+        ks = 2 * (phases - np.pi)/np.pi
+        pair1_targets = np.zeros(3) # the foot position targets for one pair of diagonal feet
+        pair2_targets = np.zeros(3) # foot position targets for the other pair
+
+        if -2 <= k < -1:
+            pair1_targets[2] = step_bottom
+            pair2_targets[2] = step_height * (-2*(k+2)*(k+2)*(k+2) + 3*(k+2)*(k+2)) + step_bottom
+        elif -1 <= k < 0:
+            pair1_targets[2] = step_bottom
+            pair2_targets[2] = step_height * (2*(k+2)*(k+2)*(k+2) - 9*(k+2)*(k+2) + 12*(k+2) - 4) + step_bottom
+        elif 0 <= k < 1:
+            pair1_targets[2] = step_height * (-2*k*k*k + 3*k*k) + step_bottom
+            pair2_targets[2] = step_bottom
+        elif 1 <= k < 2:
+            pair1_targets[2] = step_height * (2*k*k*k - 9*k*k + 12*k - 4) + step_bottom
+            pair2_targets[2] = step_bottom
+        else:
+            assert False
+        
+        foot_positions = np.zeros((4, 3))
+        foot_positions[[0,3]] = pair1_targets
+        foot_positions[[1,2]] = pair2_targets
+        foot_positions[[0,2], 1] = -lateral_offset
+        foot_positions[[1,3], 1] = lateral_offset
+        foot_positions[:,0] = x_offset
+        foot_positions += residuals
+        self.set_foot_positions(foot_positions)
+        return foot_positions # this is returned just to check tracking performance
+
+
+    def _foot_step_traj(self, phase):
+        '''Takes a phase parameter and outputs a value [0, 1]. This is according to this formula is S3 here, 
+        but normalized to [0, 1]:
+        https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf'''
+
+        assert 0 <= phase < 2 * np.pi
+        k = 2 * (phase - np.pi)/np.pi
+        if -2 <= k < 0:
+            return 0
+        elif 0 <= k < 1:
+            return -2*k*k*k + 3*k*k
+        else:
+            return 2*k*k*k - 9*k*k + 12*k - 4
+
     
     def set_foot_positions(self, foot_positions):
         '''Takes a numpy array of shape (4, 3) which represents foot xyz relative to the hip joint. Uses IK to 
         calculate joint position targets and sets those targets. Does not return anything'''
 
+        debug=False # render/display things
 
         assert foot_positions.shape == (4,3)
-        debug=True # render/display things
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
         commanded_global_foot_positions = np.zeros((4, 3))
         for i in range(4):
@@ -326,13 +393,12 @@ class Aliengo:
         self.client.removeBody(self.quadruped)
         
 
-
-
     def self_collision(self):
         '''Returns true if any of the robot links are colliding with any other link'''
 
         points = self.client.getContactPoints(self.quadruped, self.quadruped)
         return len(points) > 0
+
 
     def set_joint_position_targets(self, positions, true_positions=False):
         '''
@@ -519,9 +585,41 @@ def calculate_tracking_error(foot_positions, client, quadruped):
             commanded_global_foot_positions[i][2] = hip_joint_positions[i][2] + foot_positions[i][2]
         actual_pos = np.array([i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)])
         print('Maximum tracking error: {:e}'.format(np.abs((commanded_global_foot_positions- actual_pos)).max()))
+        print('Mean tracking error: {:e}'.format(np.abs((commanded_global_foot_positions- actual_pos)).mean()))
+        print()
+
+
+def plot_trajectory():
+    import matplotlib.pyplot as plt 
+    h = 0.2
+    k1 = np.linspace(0, 1, 100)
+    z1 = h * (-2*k1*k1*k1 + 3*k1*k1) - 0.5
+    k2 = np.linspace(1, 2, 100)
+    z2 = h * (2*k2*k2*k2 - 9*k2*k2 + 12*k2 - 4) - 0.5
+    k3 = np.linspace(-2,0,100)
+    z3 = np.ones(100) * -0.5
+    plt.plot(k1, z1, k2, z2, k3, z3)
+    plt.show()
+    sys.exit()
+
+
+def trajectory_generator_test(client, quadruped):
+    t = 0
+    counter = 1
+    # quadruped.reset_joint_positions(stochastic=False)
+    # time.sleep(2)
+    while True:
+        command = quadruped.set_trajectory_parameters(t)
+        time.sleep(1/240. * 1)
+        if counter% 2 == 0:
+            calculate_tracking_error(command, client, quadruped)
+        t += 1/240. 
+        counter += 1
 
 
 if __name__ == '__main__':
+    # plot_trajectory()
+
     # set up the quadruped in a pybullet simulation
     from pybullet_utils import bullet_client as bc
     client = client = bc.BulletClient(connection_mode=p.GUI)
@@ -529,11 +627,12 @@ if __name__ == '__main__':
     client.setGravity(0,0,-9.8)
     client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[-1,1,1])
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[0,0,0.5])
 
     # sine_tracking_test(client, quadruped)
-    floor_tracking_test(client, quadruped)
-
+    # floor_tracking_test(client, quadruped)
+    trajectory_generator_test(client, quadruped)
+    
     
 
     
