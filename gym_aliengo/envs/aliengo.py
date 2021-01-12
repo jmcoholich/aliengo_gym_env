@@ -9,7 +9,7 @@ import os
 import time
 
 class Aliengo:
-    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=1.0, 
+    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=0.1, 
                     fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0]):
         self.kp = kp
         self.kd = kd

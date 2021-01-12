@@ -22,9 +22,9 @@ class AliengoSteppingStones(gym.Env):
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
         self.max_torque = 40.0 
-        self.kp = 1.0 
+        self.kp = 0.1
         self.kd = 1.0
-        self.n_hold_frames = 1 
+        self.n_hold_frames = 4
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.realTime = realTime

@@ -22,9 +22,9 @@ class AliengoEnv(gym.Env):
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
         self.max_torque = 40.0 
-        self.kp = 1.0 
+        self.kp = 0.1
         self.kd = 1.0
-        self.n_hold_frames = 1 #TODO
+        self.n_hold_frames = 4
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
 
@@ -225,7 +225,7 @@ if __name__ == '__main__':
 
     with open('mocap.txt','r') as f:
         for line_num, line in enumerate(f): 
-            if line_num%2 == 0: # Unitree runs this demo at 500 Hz. We run at 240 Hz, so double is close enough.
+            if line_num%2*env.n_hold_frames == 0: # Unitree runs this demo at 500 Hz. We run at 240 Hz, so double is close enough.
                 action = env.quadruped._positions_to_actions(np.array(line.split(',')[2:],dtype=np.float32))
                 obs,_ , done, _ = env.step(action)
                 if counter%4 == 0:  # simulation runs at 240 Hz, so if we render every 4th frame, we get 60 fps video
