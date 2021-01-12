@@ -35,9 +35,9 @@ class AliengoHills(gym.Env):
 
         # Hills parameters, all units in meters
         self.hills_height = amplitude
-        self.mesh_res = 3 # int, points/meter
+        self.mesh_res = 15 # int, points/meter
         self.hills_length = 50
-        self.hills_width = 3
+        self.hills_width = 5
         self.ramp_distance = 1.0
         self.ray_start_height = self.hills_height + 1.0
 
@@ -51,22 +51,23 @@ class AliengoHills(gym.Env):
         # this is a random id appened to terrain file name, so that each env instance doesn't overwrite another one.
         # use randint for filenames, since the np random seed is set, all env instances will get the same random number,
         #  causing them to all write to the same file.
-        self.env_terrain_id = randint(0, 1e18) 
-        self.path = os.path.join(os.path.dirname(__file__),
-                                    '../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
+        # self.env_terrain_id = randint(0, 1e18) 
+        # self.path = os.path.join(os.path.dirname(__file__),
+        #                             '../meshes/generated_hills_' + str(self.env_terrain_id) + '.obj')
         # self.vhacd_path = os.path.join(os.path.dirname(__file__),
         #                             '../meshes/VHACD_generated_hills_' + str(self.env_terrain_id) + '.obj')
         # self.log_path = os.path.join(os.path.dirname(__file__),
         #                             '../meshes/log_VHACD_generated_hills_' + str(self.env_terrain_id) + '.txt')
 
-        
-
+    
         # Perlin Noise parameters
         self.scale = self.mesh_res * scale
         self.octaves = 1
         self.persistence = 0.0 # roughness basically (assuming octaves > 1). I'm not using this.
         self.lacunarity = 2.0
         self.base = 0 # perlin noise base, to be randomized
+        self.terrain = None # to be set later
+        self.fake_terrain = None # to be set later
 
         if self.scale == 1.0: # this causes terrain heights of all zero to be returned, for some reason
             self.scale = 1.01
@@ -102,7 +103,8 @@ class AliengoHills(gym.Env):
         self.eps_step_counter = 0 # Used for triggering timeout
         self.t = 0 # represents the actual time
 
-        self.reset()
+        self.reset(hard_reset=True) # hard reset clears the simulation and creates heightfield from scratch. Its faster
+        # to not do a hard reset, but hard reset is necessary in the constructor 
 
         self.reward = 0 # this is to store most recent reward
         self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
@@ -143,43 +145,56 @@ class AliengoHills(gym.Env):
         return self.state, self.reward, done, info
 
         
-    def reset(self):
+    def reset(self, hard_reset=False):
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
-        self.client.resetSimulation()
-        self.fake_client.resetSimulation() 
-       
-        self.client.setTimeStep(1/240.)
-        self.client.setGravity(0,0,-9.8)
-        self.client.setRealTimeSimulation(self.realTime) # this has no effect in DIRECT mode, only GUI mode
+        if hard_reset:
+            self.client.resetSimulation()
+            self.fake_client.resetSimulation() 
         
-        self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        self.fake_plane = self.fake_client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        self._create_hills()
-        self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
-                                        max_torque=self.max_torque, 
-                                        kp=self.kp, 
-                                        kd=self.kd)
-        # for link in self.quadruped.foot_links:
-        #     self.client.changeDynamics(self.quadruped.quadruped, link, contactStiffness=1e7, contactDamping=1e7)
-        #     print('stiffness:',self.client.getDynamicsInfo(self.quadruped.quadruped, link)[9], 
-        #             'damping:', self.client.getDynamicsInfo(self.quadruped.quadruped, link)[8])
+            self.client.setTimeStep(1/240.)
+            self.client.setGravity(0,0,-9.8)
+            self.client.setRealTimeSimulation(self.realTime) # this has no effect in DIRECT mode, only GUI mode
+            
+            self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
+            self.fake_plane = self.fake_client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
+            self._create_hills(update=False)
+            self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
+                                            max_torque=self.max_torque, 
+                                            kp=self.kp, 
+                                            kd=self.kd)
+            # for link in self.quadruped.foot_links:
+            #     self.client.changeDynamics(self.quadruped.quadruped, link, contactStiffness=1e7, contactDamping=1e7)
+            #     print('stiffness:',self.client.getDynamicsInfo(self.quadruped.quadruped, link)[9], 
+            #             'damping:', self.client.getDynamicsInfo(self.quadruped.quadruped, link)[8])
 
-        self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
-                                            posObj=[0,0,0.48], 
-                                            ornObj=[0,0,0,1.0]) 
+            self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
+                                                posObj=[0,0,0.48], 
+                                                ornObj=[0,0,0,1.0]) 
 
-        self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
+            self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
+            for i in range(500): # to let the robot settle on the ground.
+                self.client.stepSimulation()
+            self._update_state()
+        else: 
+            self._create_hills(update=True)
+
+            self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
+                                                posObj=[0,0,0.48], 
+                                                ornObj=[0,0,0,1.0]) 
+
+            self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
+
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
         self._update_state()
-        
+
         return self.state
     
 
-    def _create_hills(self):
+    def _create_hills(self, update):
         '''Creates an identical hills mesh using Perlin noise. Added to client and fake client'''
         
         mesh_length = self.hills_length * self.mesh_res
@@ -202,58 +217,93 @@ class AliengoHills(gym.Env):
         # Image.fromarray(((np.interp(vertices, (vertices.min(), vertices.max()), (0, 255.0))>128)*255).astype('uint8'), 'L').show()
         vertices = np.interp(vertices, (vertices.min(), vertices.max()), (0, 1.0))
 
-
         # ramp down n meters, so the robot can walk up onto the hills terrain
         for i in range(int(self.ramp_distance * self.mesh_res)):
             vertices[i, :] *= i/(self.ramp_distance * self.mesh_res)
-        vertices = vertices * self.hills_height # terrain height
+        # vertices = vertices * self.hills_height # terrain height
+        meshScale = [1.0/self.mesh_res, 1.0/self.mesh_res, self.hills_height]
+        heightfieldTextureScaling = self.mesh_res/2.
 
-        with open(self.path,'w') as f:
-            f.write('o Generated_Hills_Terrain_' + str(self.env_terrain_id) + '\n')
-            # write vertices
-            for i in range(mesh_length + 1):
-                for j in range(mesh_width + 1):
-                    f.write('v  {}   {}   {}\n'.format(i, j, vertices[i, j]))
+        if not update:
+            print(heightfieldTextureScaling)
+            self.terrain = self.client.createCollisionShape(p.GEOM_HEIGHTFIELD, 
+                                                        meshScale=meshScale, 
+                                                        heightfieldTextureScaling=heightfieldTextureScaling,
+                                                        heightfieldData=vertices.flatten(),
+                                                        numHeightfieldRows=mesh_width + 1,
+                                                        numHeightfieldColumns=mesh_length + 1)
+            self.fake_terrain = self.fake_client.createCollisionShape(p.GEOM_HEIGHTFIELD, 
+                                                        meshScale=meshScale, 
+                                                        heightfieldTextureScaling=heightfieldTextureScaling,
+                                                        heightfieldData=vertices.flatten(),
+                                                        numHeightfieldRows=mesh_width + 1,
+                                                        numHeightfieldColumns=mesh_length + 1)
+        
+            
+            ori = self.client.getQuaternionFromEuler([0, 0, -np.pi/2.])
+            pos = [self.hills_length/2. +0.5 , 0, self.hills_height/2.]
+            self.client.createMultiBody(baseCollisionShapeIndex=self.terrain, baseOrientation=ori, basePosition=pos)
+            self.fake_client.createMultiBody(baseCollisionShapeIndex=self.fake_terrain, baseOrientation=ori, basePosition=pos)
+        
+        else: # just update existing mesh
+            print(heightfieldTextureScaling)
+            self.client.createCollisionShape(p.GEOM_HEIGHTFIELD, 
+                                                        meshScale=meshScale, 
+                                                        heightfieldTextureScaling=heightfieldTextureScaling,
+                                                        heightfieldData=vertices.flatten(),
+                                                        numHeightfieldRows=mesh_width + 1,
+                                                        numHeightfieldColumns=mesh_length + 1,
+                                                        replaceHeightfieldIndex=self.terrain)
+            self.fake_client.createCollisionShape(p.GEOM_HEIGHTFIELD, 
+                                                        meshScale=meshScale, 
+                                                        heightfieldTextureScaling=heightfieldTextureScaling,
+                                                        heightfieldData=vertices.flatten(),
+                                                        numHeightfieldRows=mesh_width + 1,
+                                                        numHeightfieldColumns=mesh_length + 1,
+                                                        replaceHeightfieldIndex=self.fake_terrain)
 
-            # write faces 
-            for i in range(mesh_length):
-                for j in range(mesh_width):
-                    # bottom left triangle
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+1, 
-                                                        (mesh_width + 1)*i + j+2, 
-                                                        (mesh_width + 1)*(i+1) + j+1)) 
-                    # top right triangle
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+2, 
-                                                        (mesh_width + 1)*(i+1) + j+1, 
-                                                        (mesh_width + 1)*i + j+2)) 
-                    # repeat, making faces double-sided
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+2, 
-                                                        (mesh_width + 1)*i + j+1, 
-                                                        (mesh_width + 1)*(i+1) + j+1)) 
-                    f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+1, 
-                                                        (mesh_width + 1)*(i+1) + j+2, 
-                                                        (mesh_width + 1)*i + j+2)) 
-        # self.client.vhacd(self.path, self.vhacd_path, self.log_path)                          
-        terrain = self.client.createCollisionShape(p.GEOM_MESH, 
-                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                                    fileName=self.path,
-                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
-        fake_terrain = self.fake_client.createCollisionShape(p.GEOM_MESH, 
-                                                    meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
-                                                    fileName=self.path,
-                                                    flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
-        
-        ori = self.client.getQuaternionFromEuler([0, 0, 0])
-        pos = [0.5 , -self.hills_width/2, 0]
-        self.client.createMultiBody(baseCollisionShapeIndex=terrain, baseOrientation=ori, basePosition=pos)
-        self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_terrain, baseOrientation=ori, basePosition=pos)
 
+        return
+
+        # with open(self.path,'w') as f:
+        #     f.write('o Generated_Hills_Terrain_' + str(self.env_terrain_id) + '\n')
+        #     # write vertices
+        #     for i in range(mesh_length + 1):
+        #         for j in range(mesh_width + 1):
+        #             f.write('v  {}   {}   {}\n'.format(i, j, vertices[i, j]))
+
+        #     # write faces 
+        #     for i in range(mesh_length):
+        #         for j in range(mesh_width):
+        #             # bottom left triangle
+        #             f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+1, 
+        #                                                 (mesh_width + 1)*i + j+2, 
+        #                                                 (mesh_width + 1)*(i+1) + j+1)) 
+        #             # top right triangle
+        #             f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+2, 
+        #                                                 (mesh_width + 1)*(i+1) + j+1, 
+        #                                                 (mesh_width + 1)*i + j+2)) 
+        #             # repeat, making faces double-sided
+        #             f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*i + j+2, 
+        #                                                 (mesh_width + 1)*i + j+1, 
+        #                                                 (mesh_width + 1)*(i+1) + j+1)) 
+        #             f.write('f  {}   {}   {}\n'.format((mesh_width + 1)*(i+1) + j+1, 
+        #                                                 (mesh_width + 1)*(i+1) + j+2, 
+        #                                                 (mesh_width + 1)*i + j+2)) 
+        # # self.client.vhacd(self.path, self.vhacd_path, self.log_path)                          
+        # terrain = self.client.createCollisionShape(p.GEOM_MESH, 
+        #                                             meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
+        #                                             fileName=self.path,
+        #                                             flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+        # fake_terrain = self.fake_client.createCollisionShape(p.GEOM_MESH, 
+        #                                             meshScale=[1.0/self.mesh_res, 1.0/self.mesh_res, 1.0], 
+        #                                             fileName=self.path,
+        #                                             flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
         
-        
-        # print('stiffness:',self.client.getDynamicsInfo(self.plane, -1)[9], 
-        #         'damping:', self.client.getDynamicsInfo(self.plane, -1)[8])
-        # print('stiffness:',self.client.getDynamicsInfo(terrain, -1)[9], 
-        #         'damping:', self.client.getDynamicsInfo(terrain, -1)[8])
+        # ori = self.client.getQuaternionFromEuler([0, 0, 0])
+        # pos = [0.5 , -self.hills_width/2, 0]
+        # self.client.createMultiBody(baseCollisionShapeIndex=terrain, baseOrientation=ori, basePosition=pos)
+        # self.fake_client.createMultiBody(baseCollisionShapeIndex=fake_terrain, baseOrientation=ori, basePosition=pos)
 
         
 
@@ -372,7 +422,7 @@ if __name__ == '__main__':
     imwrite('fake_client_render.png', cvtColor(env.render(client=env.fake_client, mode='rgb_array'), COLOR_RGB2BGR))
 
     while True:
-        env.reset()
+        env.reset(hard_reset=False)
         time.sleep(1.0)
 
 
