@@ -350,7 +350,7 @@ class Aliengo:
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
             targetPositions=positions,
-            forces=self.max_torque * np.ones(self.n_motors)
+            forces=self.max_torque * np.ones(self.n_motors),
             positionGains=self.kp * np.ones(self.n_motors),
             velocityGains=self.kd * np.ones(self.n_motors))
 

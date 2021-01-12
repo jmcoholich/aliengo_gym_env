@@ -75,12 +75,11 @@ plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.u
 
 
 # load up Aliengo
-quadruped = Aliengo(client, max_torque=40.0, kd=0.1, kp=1.0)
+quadruped = Aliengo(client, max_torque=40.0, fixed=False, kp=0.1, kd=1.0)
 quadruped.reset_joint_positions(stochastic=False)
 
 # change_dynamics(client, quadruped, plane)
 # fix_feet_points(client, quadruped)
-
 
 # visualize foot collision shapes
 sphere_shape = client.createVisualShape(p.GEOM_SPHERE, 
