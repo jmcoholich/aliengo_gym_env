@@ -103,7 +103,7 @@ class AliengoEnv(gym.Env):
         if self.use_pmtg:
             f = action[0:4]
             residuals = action[4:].reshape((4,3))
-            self.phases, self.last_foot_position_command = self.quadruped.set_trajectory_parameters(t, 
+            self.phases, self.last_foot_position_command = self.quadruped.set_trajectory_parameters(self.t, 
                                                                                                     f=f, 
                                                                                                     residuals=residuals)
         else:
