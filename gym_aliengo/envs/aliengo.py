@@ -43,12 +43,7 @@ class Aliengo:
     def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3))):
         '''Takes parameters of a trot trajectory (defined in this function), a phase variable, and target foot position
         residuals. Calls set_foot_positions() to actuate robot. If only a cyclical phase is given and no foot position
-        residuals,the robot will step in place.'''
-
-        ''' TODO just input a time to this function, and I will calculate the phase. Frequency is a traj param, along with
-        freq offsets per leg. Make the inputs to this function be the action space of the policy. Then see if I can 
-        learn a flat ground policy. I think the policy just outputs fi's and residuals ''' 
-        
+        residuals, the robot will step in place. The frequency is in cycles per second, not radians per second. '''
 
         # other trajectory parameters
         step_height = 0.2 # from paper
@@ -58,28 +53,30 @@ class Aliengo:
         f0 = 1.25 # 1.25 is from paper
 
         assert t >= 0
-        freqs = f0 * np.ones(4) + f
-        periods = 1.0/freqs
-        phases = 2 * np.pi * (t % periods)/periods #TODO check this against the formula in the paper
-        
+        assert f.size == 4
+        assert residuals.shape == (4,3)
         trot_phase_offsets = np.array([0, np.pi, np.pi, 0])
-        phases = (phases + trot_phase_offsets) % (2 * np.pi)
+        phases = (trot_phase_offsets + (f0 + f) * 2 * np.pi * t) % (2 * np.pi)
 
-        phases2 = (trot_phase_offsets + (f0 + f) * t) % (2 * np.pi)
-        print(phases, phases2) # TODO debug this shid
-        assert (phases == phases2).all()
         foot_positions = np.zeros((4, 3))
         for i in range(4):
             z = step_height * self._foot_step_traj(phases[i]) + step_bottom
             foot_positions[i] = np.array([0, 0, z])
-        
 
         foot_positions[[0,2], 1] = -lateral_offset
         foot_positions[[1,3], 1] = lateral_offset
         foot_positions[:,0] = x_offset
         foot_positions += residuals
         self.set_foot_positions(foot_positions)
-        return foot_positions # this is returned just to check tracking performance
+        return phases, foot_positions # this is returned just to check tracking performance and for use as obs in envs
+
+
+    def get_pmtg_bounds(self):
+        '''Returns bounds of actions to set_trajectory_parameters. I know really know what these should be. (I don't
+        think it matters.)'''
+
+        ub = np.array([100] * 4 + [1] * 12) # frequencies, then residuals
+        return -ub, ub
 
 
     def _foot_step_traj(self, phase):
@@ -156,9 +153,6 @@ class Aliengo:
                     self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
                                                                 posObj=hip_joint_positions[i], 
                                                                 ornObj=[0,0,0,1])
-            
-            
-
 
 
     def render(self, mode, client): 
@@ -294,7 +288,6 @@ class Aliengo:
         base_x = base_position[0] 
         base_y = base_position[1]
         base_z = base_position[2]
-
 
         x = np.linspace(0, length, grid_len)
         y = np.linspace(-length/2.0, length/2.0, grid_len)
@@ -599,7 +592,7 @@ def trajectory_generator_test(client, quadruped):
     # quadruped.reset_joint_positions(stochastic=False)
     # time.sleep(2)
     while True:
-        command = quadruped.set_trajectory_parameters(t, f=np.array([0 , 0, 10, 10]))
+        phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-2.0] * 4))
         time.sleep(1/240. * 1)
         if counter% 2 == 0:
             calculate_tracking_error(command, client, quadruped)

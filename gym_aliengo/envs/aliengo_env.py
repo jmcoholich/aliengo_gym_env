@@ -17,7 +17,7 @@ for joint torques. '''
 
 
 class AliengoEnv(gym.Env):
-    def __init__(self, render=False, realTime=False):
+    def __init__(self, render=False, realTime=False, use_pmtg=True):
         # Environment Options
         self._apply_perturbations = False
         self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
@@ -27,6 +27,8 @@ class AliengoEnv(gym.Env):
         self.n_hold_frames = 4
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
+        self.use_pmtg = use_pmtg
+        self.speed_clipping = 2.0 # "...maximum walking speed exceeds 1.5 m/s" https://www.unitree.com/products/aliengo
 
 
         if self._is_render:
@@ -47,12 +49,23 @@ class AliengoEnv(gym.Env):
         self.client.setRealTimeSimulation(realTime) # this has no effect in DIRECT mode, only GUI mode
         self.client.setTimeStep(1/240.)
 
-        # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
-        # cartesian base acceleration, base angular velocity
-        self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 
+        if self.use_pmtg:
+            # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+            # Note that the (more advanced) Hutter implementation uses a larger state. For flat ground simple is fine. 
+            self.state_space_dim = 8 + 4 + 12 # 18 
+            self.action_space_dim = 16 # 4 frequency adjustments per leg, 12 position residuals (xyz per leg)
+            # action is 4 frequencies, 12 foot position residuals
+            self.action_lb, self.action_ub = self.quadruped.get_pmtg_bounds() 
+            self.t = 0.0
+            self.last_foot_position_command = np.zeros((4,3)) #TODO have a better initial value than this
+            self.phases = np.zeros(4)
+        else:
+            # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
+            # cartesian base acceleration, base angular velocity
+            self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 
+            self.action_space_dim = 12 # This is the number of Aliengo motors (3 per leg)
+            self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
         self.num_joints = 18 # This includes fixed joints from the URDF
-        self.action_space_dim = 12 # This is the number of Aliengo motors (3 per leg)
-
 
         self.state = np.zeros(self.state_space_dim) 
         self.applied_torques = np.zeros(12)
@@ -67,14 +80,13 @@ class AliengoEnv(gym.Env):
         self.eps_step_counter = 0 # Used for triggering timeout
 
         self.reward = 0 # this is to store most recent reward
-        self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
+            
         self.action_space = spaces.Box(
             low=self.action_lb,
             high=self.action_ub,
             dtype=np.float32
             )
-
-        observation_lb, observation_ub = self._find_space_limits()
+        observation_lb, observation_ub = self._find_space_limits() # this function includes logic for self.use_pmtg
         self.observation_space = spaces.Box(
             low=observation_lb,
             high=observation_ub,
@@ -87,8 +99,15 @@ class AliengoEnv(gym.Env):
         if not ((self.action_lb <= action) & (action <= self.action_ub)).all():
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
-            
-        self.quadruped.set_joint_position_targets(action)
+
+        if self.use_pmtg:
+            f = action[0:4]
+            residuals = action[4:].reshape((4,3))
+            self.phases, self.last_foot_position_command = self.quadruped.set_trajectory_parameters(t, 
+                                                                                                    f=f, 
+                                                                                                    residuals=residuals)
+        else:
+            self.quadruped.set_joint_position_targets(action)
 
         if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
             raise NotImplementedError
@@ -118,6 +137,9 @@ class AliengoEnv(gym.Env):
         self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
+        if self.use_pmtg:
+            self.t = 0.0
+            self.last_foot_position_command = np.zeros((4,3)) #TODO have a better initial value than this
         self._update_state()
         return self.state
 
@@ -135,35 +157,43 @@ class AliengoEnv(gym.Env):
     def _find_space_limits(self):
         ''' find upper and lower bounds of action and observation spaces''' 
 
-        torque_lb, torque_ub = self.quadruped.get_joint_torque_bounds()
-        position_lb, position_ub = self.quadruped.get_joint_position_bounds()
-        velocity_lb, velocity_ub = self.quadruped.get_joint_velocity_bounds()
-        observation_lb = np.concatenate((torque_lb, 
-                                        position_lb,
-                                        velocity_lb, 
-                                        -0.78 * np.ones(4), # this is for base orientation in quaternions
-                                        np.zeros(4), # foot normal forces
-                                        -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
-                                        -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
+        if self.use_pmtg:
+            # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+            # Note that the (more advanced) Hutter implementation uses a larger state. For flat ground simple is fine.
+            # 4D IMU data is pitch, roll, pitch rate, roll rate.
+            observation_ub = np.concatenate((np.ones(8), 
+                                                np.array([np.pi, np.pi, 1e5, 1e5]), # pitch, roll, pitch rate, roll rate
+                                                np.ones(12))) # last foot position commands
+            return -observation_ub, observation_ub
+        else:
+            torque_lb, torque_ub = self.quadruped.get_joint_torque_bounds()
+            position_lb, position_ub = self.quadruped.get_joint_position_bounds()
+            velocity_lb, velocity_ub = self.quadruped.get_joint_velocity_bounds()
+            observation_lb = np.concatenate((torque_lb, 
+                                            position_lb,
+                                            velocity_lb, 
+                                            -0.78 * np.ones(4), # this is for base orientation in quaternions
+                                            np.zeros(4), # foot normal forces
+                                            -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
+                                            -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
 
-        observation_ub = np.concatenate((torque_ub, 
-                                        position_ub, 
-                                        velocity_ub, 
-                                        0.78 * np.ones(4),
-                                        1e4 * np.ones(4), # arbitrary bound
-                                        1e5 * np.ones(3),
-                                        1e5 * np.ones(3)))
+            observation_ub = np.concatenate((torque_ub, 
+                                            position_ub, 
+                                            velocity_ub, 
+                                            0.78 * np.ones(4),
+                                            1e4 * np.ones(4), # arbitrary bound
+                                            1e5 * np.ones(3),
+                                            1e5 * np.ones(3)))
 
-        return observation_lb, observation_ub
-            
+            return observation_lb, observation_ub
+                
 
     def _reward_function(self) -> float:
-        ''' Calculates reward based off of current state '''
+        ''' Calculates reward based off of current state. Uses reward clipping on speed. '''
 
-        base_x_velocity = self.base_twist[0]
+        base_x_velocity = np.clip(self.base_twist[0], -np.inf, self.speed_clipping)
         torque_penalty = np.power(self.applied_torques, 2).mean()
         return base_x_velocity - 0.001 * torque_penalty 
-
 
 
     def _is_state_terminal(self) -> bool:
@@ -193,13 +223,23 @@ class AliengoEnv(gym.Env):
         self.base_twist = self.quadruped.get_base_twist()
         self.cartesian_base_accel = self.base_twist[:3] - self.previous_base_twist[:3] # TODO divide by timestep or assert timestep == 1/240.
         self.foot_normal_forces = self.quadruped._get_foot_contacts()
-        self.state = np.concatenate((self.applied_torques, 
-                                    self.joint_positions,
-                                    self.joint_velocities,
-                                    self.base_orientation,
-                                    self.foot_normal_forces,
-                                    self.cartesian_base_accel,
-                                    self.base_twist[3:])) # last item is base angular velocity
+
+        if self.use_pmtg:
+            # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+            self.state = np.concatenate((np.sin(self.phases),
+                                            np.cos(self.phases),
+                                            self.client.getEulerFromQuaternion(self.base_orientation)[:-1], # pitch roll 
+                                            self.base_twist[3:-1],# pitch rate, roll rate
+                                            self.last_foot_position_command.flatten()))
+            self.t += 1./240. * self.n_hold_frames
+        else:
+            self.state = np.concatenate((self.applied_torques, 
+                                            self.joint_positions,
+                                            self.joint_velocities,
+                                            self.base_orientation,
+                                            self.foot_normal_forces,
+                                            self.cartesian_base_accel,
+                                            self.base_twist[3:])) # last item is base angular velocity
         
 
         if np.isnan(self.state).any():
@@ -215,7 +255,7 @@ if __name__ == '__main__':
     save video. https://github.com/unitreerobotics/aliengo_pybullet'''
 
     import cv2
-    env = gym.make('gym_aliengo:Aliengo-v0')    
+    env = gym.make('gym_aliengo:Aliengo-v0', use_pmtg=False)    
     env.reset()
 
     img = env.render('rgb_array')
