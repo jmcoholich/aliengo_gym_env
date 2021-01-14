@@ -155,14 +155,20 @@ class Aliengo:
 
         assert foot_positions.shape == (4,3)
         commanded_global_foot_positions = self._foot_frame_pos_to_global(foot_positions) 
-        # print(yaw)
-        # print(commanded_global_foot_positions)
-        # sys.exit()
-        joint_positions = np.array(self.client.calculateInverseKinematics2(self.quadruped,
-                                                self.foot_links,
-                                                commanded_global_foot_positions))
-                                                # maxNumIterations=1000,
-                                                # residualThreshold=1e-10))
+
+        # TODO use analytic IK (probably faster and more accurate)
+        # calculateInverseKinematics2 has a memory leak, so using the original
+        joint_positions = np.zeros(12)
+        for i in range(4):
+            joint_positions[i*3: (i+1)*3] = np.array(self.client.calculateInverseKinematics(self.quadruped,
+                                                    self.foot_links[i],
+                                                    targetPosition=commanded_global_foot_positions[i]))[i*3: (i+1)*3]
+                                                    # maxNumIterations=1000,
+                                                    # residualThreshold=1e-10))
+        # old way
+        # joint_positions = np.array(self.client.calculateInverseKinematics2(self.quadruped,
+        #                                             self.foot_links,
+        #                                             targetPositions=commanded_global_foot_positions))
         self.set_joint_position_targets(joint_positions, true_positions=True)
 
         if debug:
@@ -700,7 +706,7 @@ if __name__ == '__main__':
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
     quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0)
 
-    # sine_tracking_test(client, quadruped) # todo add a visualization function
+    # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     axes_shift_function_test(client, quadruped) # error should be about 2e-17
