@@ -88,6 +88,9 @@ class AliengoSteps(gym.Env):
         self.reset()
 
         self.reward = 0 # this is to store most recent reward
+        self.mean_torque_squared = 0 # online avg
+        self.mean_x_vel = 0 # online avg
+
         self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
         self.action_space = spaces.Box(
             low=self.action_lb,
@@ -118,11 +121,16 @@ class AliengoSteps(gym.Env):
         self.eps_step_counter += 1
         self._update_state()
         done, info = self._is_state_terminal()
-        self.reward = self._reward_function()
+        self.reward, torque_penalty = self._reward_function() # this must come after self._update_state()
+        self.mean_torque_squared += (torque_penalty - self.mean_torque_squared)/self.eps_step_counter 
+        self.mean_x_vel += (self.base_twist[0] - self.mean_x_vel)/self.eps_step_counter
 
+        # info = {'':''} # this is returned so that env.step() matches Open AI gym API 
         if done:
-            self.eps_step_counter = 0
-
+            info['mean_torque_squared'] = self.mean_torque_squared
+            info['distance_traveled'] = self.base_position[0]
+            info['mean_x_vel'] = self.mean_x_vel
+            
         return self.state, self.reward, done, info
 
         
@@ -131,6 +139,7 @@ class AliengoSteps(gym.Env):
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
+        self.eps_step_counter = 0
         self.client.resetSimulation()
         self.fake_client.resetSimulation() 
        
@@ -234,8 +243,8 @@ class AliengoSteps(gym.Env):
         ''' Calculates reward based off of current state '''
 
         base_x_velocity = self.base_twist[0]
-        torque_penalty = np.power(self.applied_torques, 2).mean()
-        return base_x_velocity - 0.000005 * torque_penalty
+        torque_penalty = (self.applied_torques * self.applied_torques).mean()
+        return base_x_velocity - 0.000005 * torque_penalty, torque_penalty
 
 
     def _is_state_terminal(self) -> bool:

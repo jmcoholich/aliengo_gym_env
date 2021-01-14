@@ -107,6 +107,9 @@ class AliengoHills(gym.Env):
         # to not do a hard reset, but hard reset is necessary in the constructor 
 
         self.reward = 0 # this is to store most recent reward
+        self.mean_torque_squared = 0 # online avg
+        self.mean_x_vel = 0 # online avg
+
         self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
         self.action_space = spaces.Box(
             low=self.action_lb,
@@ -137,10 +140,16 @@ class AliengoHills(gym.Env):
         self.eps_step_counter += 1
         self._update_state()
         done, info = self._is_state_terminal()
-        self.reward = self._reward_function()
+        self.reward, torque_penalty = self._reward_function() # this must come after self._update_state()
+        self.mean_torque_squared += (torque_penalty - self.mean_torque_squared)/self.eps_step_counter 
+        self.mean_x_vel += (self.base_twist[0] - self.mean_x_vel)/self.eps_step_counter
 
+        # info = {'':''} # this is returned so that env.step() matches Open AI gym API 
         if done:
-            self.eps_step_counter = 0
+            info['mean_torque_squared'] = self.mean_torque_squared
+            info['distance_traveled'] = self.base_position[0]
+            info['mean_x_vel'] = self.mean_x_vel
+            
 
         return self.state, self.reward, done, info
 
@@ -186,7 +195,7 @@ class AliengoHills(gym.Env):
                                                 ornObj=[0,0,0,1.0]) 
 
             self.quadruped.reset_joint_positions(stochastic=True) # will put all joints at default starting positions
-
+        self.eps_step_counter = 0
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
         self._update_state()
@@ -225,7 +234,6 @@ class AliengoHills(gym.Env):
         heightfieldTextureScaling = self.mesh_res/2.
 
         if not update:
-            print(heightfieldTextureScaling)
             self.terrain = self.client.createCollisionShape(p.GEOM_HEIGHTFIELD, 
                                                         meshScale=meshScale, 
                                                         heightfieldTextureScaling=heightfieldTextureScaling,
@@ -246,7 +254,6 @@ class AliengoHills(gym.Env):
             self.fake_client.createMultiBody(baseCollisionShapeIndex=self.fake_terrain, baseOrientation=ori, basePosition=pos)
         
         else: # just update existing mesh
-            print(heightfieldTextureScaling)
             self.client.createCollisionShape(p.GEOM_HEIGHTFIELD, 
                                                         meshScale=meshScale, 
                                                         heightfieldTextureScaling=heightfieldTextureScaling,
@@ -351,8 +358,8 @@ class AliengoHills(gym.Env):
         ''' Calculates reward based off of current state '''
 
         base_x_velocity = self.base_twist[0]
-        torque_penalty = np.power(self.applied_torques, 2).mean()
-        return base_x_velocity - 0.000005 * torque_penalty
+        torque_penalty = (self.applied_torques * self.applied_torques).mean()
+        return base_x_velocity - 0.000005 * torque_penalty, torque_penalty
 
 
 
