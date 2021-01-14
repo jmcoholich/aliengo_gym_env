@@ -99,7 +99,8 @@ class AliengoEnv(gym.Env):
 
     def step(self, action):
         # action = np.clip(action, self.action_space.low, self.action_space.high)
-        if not ((self.action_lb <= action) & (action <= self.action_ub)).all():
+        DELTA = 0.01
+        if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
 
