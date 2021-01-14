@@ -23,8 +23,6 @@ class Aliengo:
         self.hip_links = [2, 6, 10, 14]
         self.quadruped = self.load_urdf(fixed=fixed, fixed_position=fixed_position, fixed_orientation=fixed_orientation)
 
-    
-        
         # indices are in order of [shoulder, hip, knee] for FR, FL, RR, RL. The skipped numbers are fixed joints
         # in the URDF
         self.motor_joint_indices = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16] 
@@ -75,7 +73,7 @@ class Aliengo:
         '''Returns bounds of actions to set_trajectory_parameters. I know really know what these should be. (I don't
         think it matters.)'''
 
-        ub = np.array([100] * 4 + [1.0] * 12) # frequencies, then residuals
+        ub = np.array([0.2] * 4 + [0.5] * 12) # frequencies, then residuals #TODO this is probably too tight for freq
         return -ub, ub
 
 
@@ -182,7 +180,7 @@ class Aliengo:
 
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
         for i in range(4):
-            hip_offset_from_base = self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14] #TODO
+            hip_offset_from_base = self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14] #TODO just store this value
             base_p, base_o = self.client.getBasePositionAndOrientation(self.quadruped)
             hip_joint_positions[i], _ = np.array(self.client.multiplyTransforms(positionA=base_p,
                                                     orientationA=base_o,

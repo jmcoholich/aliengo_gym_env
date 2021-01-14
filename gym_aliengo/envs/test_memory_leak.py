@@ -13,11 +13,11 @@ import gym
 import pybullet as p
 import numpy as np
 
-env = gym.make('gym_aliengo:Aliengo-v0', use_pmtg=True)
+env = gym.make('gym_aliengo:Aliengo-v0', use_pmtg=True, render=True)
 env.reset()
 
 
-action = np.random.rand(16)
+action = np.random.rand(16) * 0.1
 for _ in range(50_000):
     # env.reset()
     env.step(action) # the issue is with env.step(). ONLY when PMTG is enabled
