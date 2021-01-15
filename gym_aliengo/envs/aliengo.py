@@ -29,7 +29,7 @@ class Aliengo:
         self.hip_joints = [2, 6, 10, 14]
         self.thigh_joints = [3, 7, 11, 15]
         self.knee_joints = [4, 8, 12, 16]
-        self.num_links = 19
+        self.num_links = 18 # 19 links if the "base" link is included (massless, 0.001 cube)
         self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
 
         self._debug_ids = [] # this is for the visualization when debug = True for heightmap
@@ -48,6 +48,30 @@ class Aliengo:
         '''
 
         pass
+
+
+    def randomize_foot_friction(self, lb=0.3, ub=1.2):
+        '''Randomizes the coefficient of friction of each foot, sampled from uniform random distribution. Returns the 
+        random coefficients.'''
+
+        coeffs = np.random.uniform(low=lb, high=ub, size=4)
+        for i in range(4):
+            self.client.changeDynamics(self.quadruped, self.foot_links[i], lateralFriction=coeffs[i])
+        return coeffs
+
+    
+    def randomize_link_masses(self, lb=0.05, ub=0.05):
+        '''Set link masses to random values, which are uniformly random percent increases/decreases to original link 
+        mass. Returns random masses. Excludes links that have zero mass. Should probably only be called when resetting
+        environments. Returns the new masses.'''
+        
+        assert lb > -1.0
+        factors = np.random.uniform(low=lb, high=ub, size=self.num_links) + 1.0
+        new_masses = np.zeros(self.num_links)
+        for i in range(self.num_links):
+            new_masses[i] = self.client.getDynamicsInfo(self.quadruped, i)[0] * factors[i]
+            self.client.changeDynamics(self.quadruped, i, mass=new_masses[i])
+        return new_masses
 
 
     def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3)), debug=False):
@@ -785,4 +809,4 @@ if __name__ == '__main__':
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
-
+    quadruped.randomize_link_masses()
