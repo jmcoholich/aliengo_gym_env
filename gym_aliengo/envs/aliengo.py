@@ -10,7 +10,7 @@ import time
 
 class Aliengo:
     def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=0.1, 
-                    fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0]):
+                    fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0], vis=False):
         self.kp = kp
         self.kd = kd
         self.client = pybullet_client
@@ -34,21 +34,65 @@ class Aliengo:
 
         self._debug_ids = [] # this is for the visualization when debug = True for heightmap
 
-        self.init_vis = True 
+        self.init_vis = True #TODO get rid of this 
+        
+        self.num_foot_terrain_scan_points = 10 # per foot
+        self.vis = vis
+        if vis:
+            self._init_vis()
 
+    
+    def _init_vis(self):
+        small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 0, 255, 0.9])
+        self.foot_scan_balls = [0] * self.num_foot_terrain_scan_points * 4
+        self.foot_text = [0] * self.num_foot_terrain_scan_points * 4
+        for i in range(self.num_foot_terrain_scan_points * 4):
+            self.foot_scan_balls[i] = self.client.createMultiBody(baseVisualShapeIndex=small_ball)
+            self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
+        
 
-    def get_privledged_terrain_info(self):
+    def get_privledged_terrain_info(self, fake_client, flat_ground=False, ray_start=100):
         ''' 
         Priveledged info includes
         - terrain profile = scan of nine points in a 10 cm radius around each foot
+            - this requires a replica of the simulation without the quadruped('fake_client')
         - foot contact states and forces
         - friction coefficients
         - external disturbances forces
         From page 8 of https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
+        TODO see if starting the rays extremely is actually slower (ie do I care about making rays shorter when I can)
+        TODO implement flatground version that doesn't require fake_client
+        TODO put this shid into a different function
         '''
 
-        pass
+        foot_pos = np.array([i[0] for i in self.client.getLinkStates(self.quadruped, self.foot_links)])
+        r = 0.1
+        n = self.num_foot_terrain_scan_points
+        x = np.linspace(0, 2*np.pi, n)
+        scan_positions = (np.expand_dims(foot_pos[:, :-1], 1) + \
+                            np.expand_dims(np.stack((r * np.cos(x), r * np.sin(x))).swapaxes(0,1), 0)).reshape((4*n, 2))
+        ray_start_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * ray_start), axis=1)
+        ray_end_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * -1), axis=1)
+        raw = client.rayTestBatch(rayFromPositions=ray_start_pos, rayToPositions=ray_end_pos)
+        relative_z = np.array([raw[i][3][2] - foot_pos[j][2] for j in range(4) for i in range(j * n, (j+1) * n)])
+        
+        if self.vis: 
+            # I actually want the visualization sphere to be on the ground, not at relative_z height
+            # print the values of relative_z though.
+            for i in range(n * 4):
+                pos = np.concatenate((scan_positions[i], [raw[i][3][2]]))
+                self.client.resetBasePositionAndOrientation(self.foot_scan_balls[i], posObj=pos, ornObj=[0,0,0,1])
+                self.client.addUserDebugText('{:.3f}'.format(relative_z[i]), 
+                                                textPosition=pos, 
+                                                replaceItemUniqueId=self.foot_text[i],
+                                                textColorRGB=[0]*3)
+        
+        terrain_profile = relative_z
 
+
+    def _get_foot_terrain_scan(self, fake_client, flat_ground=False, ray_start=100):
+        pass
+            
 
     def randomize_foot_friction(self, lb=0.3, ub=1.2):
         '''Randomizes the coefficient of friction of each foot, sampled from uniform random distribution. Returns the 
@@ -802,11 +846,14 @@ if __name__ == '__main__':
     client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0)
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0, vis=True)
 
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
-    quadruped.randomize_link_masses()
+    while True:
+        quadruped.get_privledged_terrain_info(client)
+        client.stepSimulation()
+        time.sleep(1/240.)
