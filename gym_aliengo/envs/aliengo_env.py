@@ -243,10 +243,13 @@ class AliengoEnv(gym.Env):
 
         if self.use_pmtg:
             # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+            imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], 
+                                    self.base_twist[3:-1]))
+            # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
+            imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
             self.state = np.concatenate((np.sin(self.phases),
                                             np.cos(self.phases),
-                                            self.client.getEulerFromQuaternion(self.base_orientation)[:-1], # roll,pitch
-                                            self.base_twist[3:-1],# roll rate, pitch rate
+                                            imu,
                                             self.last_foot_position_command.flatten()))
         else:
             self.state = np.concatenate((self.applied_torques, 
