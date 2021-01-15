@@ -2,6 +2,7 @@
 *.dat
 *.obj
 *.png
+*.zip
 .vscode/
 
 

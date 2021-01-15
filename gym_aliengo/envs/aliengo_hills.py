@@ -32,6 +32,9 @@ class AliengoHills(gym.Env):
         self._is_render = render
         self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.realTime = realTime
+        if realTime:
+            warnings.warn('\n\n' + '#'*100 + '\nExternal force/torque disturbances will NOT work properly with '
+                            'real time pybullet GUI enabled.\n' + '#'*100 + '\n') # how to make this warning yellow?
 
         # Hills parameters, all units in meters
         self.hills_height = amplitude

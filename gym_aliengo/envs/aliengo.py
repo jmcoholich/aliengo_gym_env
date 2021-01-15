@@ -37,6 +37,19 @@ class Aliengo:
         self.init_vis = True 
 
 
+    def get_privledged_terrain_info(self):
+        ''' 
+        Priveledged info includes
+        - terrain profile = scan of nine points in a 10 cm radius around each foot
+        - foot contact states and forces
+        - friction coefficients
+        - external disturbances forces
+        From page 8 of https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
+        '''
+
+        pass
+
+
     def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3)), debug=False):
         '''Takes parameters of a trot trajectory (defined in this function), a phase variable, and target foot position
         residuals. Calls set_foot_positions() to actuate robot. If only a cyclical phase is given and no foot position
@@ -98,6 +111,7 @@ class Aliengo:
 
         Inverse of _foot_frame_pos_to_global().
         '''
+
         if global_pos is None:
             global_pos = np.array([i[0] for i in self.client.getLinkStates(self.quadruped, self.foot_links)])
         # cartesian_pos[:, 2] -= 0.0265 # compenstate for collision sphere radius
@@ -173,9 +187,10 @@ class Aliengo:
             self.visualize(commanded_global_foot_positions=commanded_global_foot_positions)
            
 
-    def visualize(self, commanded_global_foot_positions=None):
+    def visualize(self, commanded_global_foot_positions=None): #TODO make visualize a constructor kwarg
         ''' green spheres are commanded positions, red spheres are actual positions. 
         TODOmaybe: add the foot coordinate frames visualization, and light up feet that are contacting.
+        TODO: visualize external forces and torques.
         '''
 
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
@@ -284,14 +299,38 @@ class Aliengo:
             return
 
 
-    def _apply_perturbation(self):
-        raise NotImplementedError
-        if np.random.rand() > 0.5: # apply force
-            force = tuple(10 * (np.random.rand(3) - 0.5))
-            self.client.applyExternalForce(self.quadruped, -1, force, (0,0,0), p.LINK_FRAME)
-        else: # apply torque
-            torque = tuple(0.5 * (np.random.rand(3) - 0.5))
-            self.client.applyExternalTorque(self.quadruped, -1, torque, p.LINK_FRAME)
+    def apply_torso_disturbance(self, wrench=None, max_force_mag=5000, max_torque_mag=500): 
+        '''Applies a given wrench to robot torso, or defaults to a random wrench. Only lasts for one timestep.
+        Returns the wrench that was applied.
+        
+        NOTE: This function doesn't work properly when p.setRealTimeSimulation(True).
+        '''
+
+        if wrench is None:
+            max_force_component = (max_force_mag * max_force_mag/3.0)**0.5
+            max_torque_component = (max_torque_mag * max_torque_mag/3.0)**0.5
+            rand_force = (np.random.random_sample(3) - 0.5) * max_force_component * 2 # U[-max_force_component, +max...]
+            rand_torque = (np.random.random_sample(3) - 0.5) * max_torque_component * 2
+            wrench = np.concatenate((rand_force, rand_torque))
+        self.client.applyExternalForce(self.quadruped, -1, wrench[:3], [0, 0, 0], p.LINK_FRAME)
+        self.client.applyExternalTorque(self.quadruped, -1, wrench[3:], p.LINK_FRAME)
+        return wrench
+
+
+    def apply_foot_disturbance(self, force=None, foot=None, max_force_mag=2500):
+        '''Applies a given force to a given foot, or defaults to random force applied to random foot. Only lasts for 
+        one timestep. Returns force and foot applied to. 
+        
+        NOTE: This function doesn't work properly when p.setRealTimeSimulation(True).
+        '''
+
+        if force is None:
+            max_force_component = (max_force_mag * max_force_mag/3.0)**0.5
+            force = (np.random.random_sample(3) - 0.5) * max_force_component * 2
+        if foot is None:
+            foot = np.random.randint(0, 4)
+        self.client.applyExternalForce(self.quadruped, self.foot_links[foot], force, (0,0,0), p.LINK_FRAME)
+        return force, foot
     
 
     def _get_foot_contacts(self, _object=None): 
@@ -588,15 +627,21 @@ class Aliengo:
 def sine_tracking_test(client, quadruped):
     # test foot position command tracking and print tracking error
     t = 0
+    counter = 0
     while True:
         command = np.array([[0.1 * np.sin(2*t), -0.1 * np.sin(2*t), -0.3  + 0.1 * np.sin(2*t)] for _ in range(4)])
         quadruped.set_foot_positions(command, debug=True)
         orientation = client.getQuaternionFromEuler([np.pi/4.*np.sin(t)]*3)
         client.resetBasePositionAndOrientation(quadruped.quadruped,[-1,1,1], orientation)
+
+        if counter%240 == 0:
+            quadruped.apply_foot_disturbance()    
+        client.stepSimulation()
         time.sleep(1/240.)
         t += 1/240.
-
+        counter += 1
         calculate_tracking_error(command, client, quadruped)
+        
 
 
 def floor_tracking_test(client, quadruped):
@@ -607,6 +652,8 @@ def floor_tracking_test(client, quadruped):
         command = np.array([[0.1 * np.sin(2*t), 0, z] for _ in range(4)])
         quadruped.set_foot_positions(command, debug=True)
         client.resetBasePositionAndOrientation(quadruped.quadruped,[0.,0.,0.5], [0.,0.,0.,1.0])
+        
+        client.stepSimulation()
         time.sleep(1/240.)
         t += 1/240.
 
@@ -662,6 +709,7 @@ def trajectory_generator_test(client, quadruped):
     # time.sleep(2)
     while True:
         phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-2.0] * 4), debug=True)
+        client.stepSimulation()
         time.sleep(1/240. * 1)
         if counter% 2 == 0:
             calculate_tracking_error(command, client, quadruped)
@@ -691,15 +739,43 @@ def axes_shift_function_test(client, quadruped):
     print('#' * 50 + '\n')
         
 
+def test_disturbances(client, quadruped):
+    client.setRealTimeSimulation(0)
+    client.removeBody(quadruped.quadruped)
+    quadruped = Aliengo(client, fixed=False)
+
+    # cstr = client.createConstraint(parentBodyUniqueId=quadruped.quadruped, 
+    #                         parentLinkIndex=-1, 
+    #                         childBodyUniqueId=-1, 
+    #                         childLinkIndex=-1, 
+    #                         jointType=p.JOINT_FIXED, 
+    #                         jointAxis=[0]*3, 
+    #                         parentFramePosition=[0]*3,
+    #                         childFramePosition=[0,0,1])
+    # client.changeConstraint(cstr, maxForce=100.0)
+    counter = 0
+    flag = True
+    while True:
+        if counter%10 == 0:
+            if flag:
+                print(quadruped.apply_torso_disturbance())#wrench=[1e10]*6))
+                flag = False
+            else:
+                print(quadruped.apply_foot_disturbance())
+                flag = True
+        time.sleep(1./240)
+        client.stepSimulation()
+        counter += 1
+
 if __name__ == '__main__':
     # plot_trajectory()
 
     # set up the quadruped in a pybullet simulation
     from pybullet_utils import bullet_client as bc
-    client = client = bc.BulletClient(connection_mode=p.GUI)
+    client = bc.BulletClient(connection_mode=p.GUI)
     client.setTimeStep(1/240.)
     client.setGravity(0,0,-9.8)
-    client.setRealTimeSimulation(True) # this has no effect in DIRECT mode, only GUI mode
+    client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
     quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0)
@@ -707,9 +783,6 @@ if __name__ == '__main__':
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
-    axes_shift_function_test(client, quadruped) # error should be about 2e-17
+    # axes_shift_function_test(client, quadruped) # error should be about 2e-17
+    # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
 
-    
-    
-
-    

@@ -1,25 +1,28 @@
 ''' Script created to test the memory leak with p.calculateInverseKinematics2()
 
-TODO reproduce the memory leak issue and submit a git issue
-
 Command to run:
 mprof run python test_memory_leak.py
-
 mprof plot
 
+When finished, to delete all generate logs:
+mprof clean
 
+Other requiements: 
+memory-profiler https://pypi.org/project/memory-profiler/
+    pip install memory-profiler
 '''
-import gym
+
+
 import pybullet as p
-import numpy as np
+import pybullet_data
+import os
 
-env = gym.make('gym_aliengo:Aliengo-v0', use_pmtg=True, render=True)
-env.reset()
+path = os.path.abspath(os.path.dirname(pybullet_data.__file__))
+client = p.connect(p.GUI)
+robot = p.loadSDF(os.path.join(path, 'kuka_iiwa/kuka_with_gripper.sdf'), physicsClientId=client)[0]
 
-
-action = np.random.rand(16) * 0.1
-for _ in range(50_000):
-    # env.reset()
-    env.step(action) # the issue is with env.step(). ONLY when PMTG is enabled
+for _ in range(50_000): # increase number of iterations to show more memory leaking
+    p.calculateInverseKinematics2(robot, [10], [[10]*3], physicsClientId=client) # function has memory leak
+    # p.calculateInverseKinematics(robot, 10, [10]*3, physicsClientId=client) # run this command instead, no memory leak
 
 

@@ -46,6 +46,9 @@ class AliengoEnv(gym.Env):
                                         kd=self.kd)
 
         self.client.setGravity(0,0,-9.8)
+        if realTime:
+            warnings.warn('\n\n' + '#'*100 + '\nExternal force/torque disturbances will NOT work properly with '
+                            'real time pybullet GUI enabled.\n' + '#'*100 + '\n') # how to make this warning yellow?
         self.client.setRealTimeSimulation(realTime) # this has no effect in DIRECT mode, only GUI mode
         self.client.setTimeStep(1/240.)
 
