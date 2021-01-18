@@ -239,7 +239,7 @@ class AliengoEnv(gym.Env):
         self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
         self.base_twist = self.quadruped.get_base_twist()
         self.cartesian_base_accel = (self.base_twist[:3] - self.previous_base_twist[:3])/(1.0/240 * self.n_hold_frames)
-        self.foot_normal_forces = self.quadruped._get_foot_contacts()
+        self.foot_normal_forces = self.quadruped.get_foot_contacts()
 
         if self.use_pmtg:
             # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets

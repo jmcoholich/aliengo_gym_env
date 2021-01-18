@@ -31,6 +31,8 @@ class Aliengo:
         self.knee_joints = [4, 8, 12, 16]
         self.num_links = 18 # 19 links if the "base" link is included (massless, 0.001 cube)
         self.positions_lb, self.positions_ub, self.position_mean, self.position_range = self._find_position_bounds()
+        self.foot_friction_coeffs = np.array([0.5]*4)
+        self.link_masses = np.array([self.client.getDynamicsInfo(self.quadruped, i)[0] for i in range(self.num_links)])
 
         self._debug_ids = [] # this is for the visualization when debug = True for heightmap
 
@@ -40,6 +42,54 @@ class Aliengo:
         self.vis = vis
         if vis:
             self._init_vis()
+
+
+        '''For use in calculating smoothness reward.
+        NOTE self.reset_joint_positions() should be called before pmtg_reward is to initialize this variable. 
+        Most recent foot position target will be at index 0. Position targets are in foot frame, not global.'''
+        self.foot_target_history = [''] * 3
+
+
+    def pmtg_reward(self):
+        ''' 
+        Returns the reward function specified in S4 here: 
+        https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf 
+        - however, just reward fwd movement, no angular velocity reward bc command direction (+x) never changes
+        - interestingly, all the reward functions are wrapped in an exponential function, so the agent gets
+        exponentially increasing rewards as it gets better (up to a threshold)
+
+        TODO structure code here and in environments such that I avoid repeated pybullet function calls. Perhaps this
+        function can eventually return pmtg reward AND observation. (or write another function that calls this one 
+        to do that)
+        
+        Clipping lienar velocity to 1.8 based on: 
+         "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
+
+        '''
+
+        speed_treshold = 1.8 # m/s
+        base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
+        lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
+                                                                                if base_vel[0] < speed_treshold else 1.0
+
+        # angular_vel_rew = 0.0
+
+        base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
+                                            np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
+
+        # foot_clearance_rew = 0 #TODO this reward seems strange and the definition is overly mathematical lol
+
+        body_collision_rew = -self._is_non_foot_ground_contact() # max is 0
+
+        target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
+                                                                                            self.foot_target_history[2])
+
+        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
+        applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        torque_rew = -np.linalg.norm(applied_torques, 1)
+        
+        return 0.05 * lin_vel_rew + 0.04 * base_motion_rew + 0.02 * body_collision_rew + 0.025 * target_smoothness_rew \
+                        2e-5 * torque_rew
 
     
     def _init_vis(self):
@@ -51,19 +101,30 @@ class Aliengo:
             self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
         
 
-    def get_privledged_terrain_info(self, fake_client, flat_ground=False, ray_start=100):
+    def get_privileged_info(self, fake_client, flat_ground=False, ray_start=100):
         ''' 
         Priveledged info includes
         - terrain profile = scan of nine points in a 10 cm radius around each foot
             - this requires a replica of the simulation without the quadruped('fake_client')
         - foot contact states and forces
         - friction coefficients
-        - external disturbances forces
+        - link masses
+        NOTE: this does not include external disturbances forces
         From page 8 of https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
         TODO see if starting the rays extremely is actually slower (ie do I care about making rays shorter when I can)
-        TODO implement flatground version that doesn't require fake_client
-        TODO put this shid into a different function
+        maybeTODO add if body is contacting? 
         '''
+
+        terrain_profile = self._get_foot_terrain_scan(fake_client, flat_ground=flat_ground, ray_start=ray_start)
+        contact_forces = self.get_foot_contacts()
+        privileged_info = np.concatenate((terrain_profile, contact_forces, self.foot_friction_coeffs, self.link_masses))
+        return privileged_info
+        
+
+    def _get_foot_terrain_scan(self, fake_client, flat_ground=False, ray_start=100):
+        '''Returns a flat array of relative heights of length 4 * self.num_foot_terrain_scan_points.
+        TODO implement flat_ground in a way that doesn't require fake client
+        NOTE concavity of terrain can't be determined with this scan setup.'''
 
         foot_pos = np.array([i[0] for i in self.client.getLinkStates(self.quadruped, self.foot_links)])
         r = 0.1
@@ -73,12 +134,10 @@ class Aliengo:
                             np.expand_dims(np.stack((r * np.cos(x), r * np.sin(x))).swapaxes(0,1), 0)).reshape((4*n, 2))
         ray_start_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * ray_start), axis=1)
         ray_end_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * -1), axis=1)
-        raw = client.rayTestBatch(rayFromPositions=ray_start_pos, rayToPositions=ray_end_pos)
+        raw = fake_client.rayTestBatch(rayFromPositions=ray_start_pos, rayToPositions=ray_end_pos)
         relative_z = np.array([raw[i][3][2] - foot_pos[j][2] for j in range(4) for i in range(j * n, (j+1) * n)])
         
         if self.vis: 
-            # I actually want the visualization sphere to be on the ground, not at relative_z height
-            # print the values of relative_z though.
             for i in range(n * 4):
                 pos = np.concatenate((scan_positions[i], [raw[i][3][2]]))
                 self.client.resetBasePositionAndOrientation(self.foot_scan_balls[i], posObj=pos, ornObj=[0,0,0,1])
@@ -86,22 +145,17 @@ class Aliengo:
                                                 textPosition=pos, 
                                                 replaceItemUniqueId=self.foot_text[i],
                                                 textColorRGB=[0]*3)
-        
-        terrain_profile = relative_z
-
-
-    def _get_foot_terrain_scan(self, fake_client, flat_ground=False, ray_start=100):
-        pass
+        return relative_z
             
 
     def randomize_foot_friction(self, lb=0.3, ub=1.2):
         '''Randomizes the coefficient of friction of each foot, sampled from uniform random distribution. Returns the 
         random coefficients.'''
 
-        coeffs = np.random.uniform(low=lb, high=ub, size=4)
+        self.foot_friction_coeffs = np.random.uniform(low=lb, high=ub, size=4)
         for i in range(4):
-            self.client.changeDynamics(self.quadruped, self.foot_links[i], lateralFriction=coeffs[i])
-        return coeffs
+            self.client.changeDynamics(self.quadruped, self.foot_links[i], lateralFriction=self.foot_friction_coeffs[i])
+        return self.foot_friction_coeffs
 
     
     def randomize_link_masses(self, lb=0.05, ub=0.05):
@@ -111,11 +165,10 @@ class Aliengo:
         
         assert lb > -1.0
         factors = np.random.uniform(low=lb, high=ub, size=self.num_links) + 1.0
-        new_masses = np.zeros(self.num_links)
         for i in range(self.num_links):
-            new_masses[i] = self.client.getDynamicsInfo(self.quadruped, i)[0] * factors[i]
-            self.client.changeDynamics(self.quadruped, i, mass=new_masses[i])
-        return new_masses
+            self.link_masses[i] = self.client.getDynamicsInfo(self.quadruped, i)[0] * factors[i]
+            self.client.changeDynamics(self.quadruped, i, mass=self.link_masses[i])
+        return self.link_masses
 
 
     def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3)), debug=False):
@@ -234,6 +287,9 @@ class Aliengo:
         The Z-foot position represents the BOTTOM of the collision sphere'''
 
         assert foot_positions.shape == (4,3)
+        self.foot_target_history.pop()
+        self.foot_target_history.insert(foot_positions, 0) 
+        
         commanded_global_foot_positions = self._foot_frame_pos_to_global(foot_positions) 
 
         # TODO use analytic IK (probably faster and more accurate)
@@ -296,7 +352,6 @@ class Aliengo:
                 self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
                                                             posObj=hip_joint_positions[i], 
                                                             ornObj=[0,0,0,1])
-
 
 
     def render(self, mode, client): 
@@ -401,7 +456,7 @@ class Aliengo:
         return force, foot
     
 
-    def _get_foot_contacts(self, _object=None): 
+    def get_foot_contacts(self, object_=None): 
         '''
         Returns a numpy array of shape (4,) containing the normal forces on each foot with the object given. If 
         no object given, just checks with any object in self.client simulation. 
@@ -409,12 +464,12 @@ class Aliengo:
 
         contacts = [0] * 4
         for i in range(len(self.foot_links)):
-            if _object is None:
+            if object_ is None:
                 info = self.client.getContactPoints(bodyA=self.quadruped, 
                                                     linkIndexA=self.foot_links[i])
             else:
                 info = self.client.getContactPoints(bodyA=self.quadruped, 
-                                                    bodyB=_object,
+                                                    bodyB=object_,
                                                     linkIndexA=self.foot_links[i])
             if len(info) == 0: # leg does not contact ground
                 contacts[i] = 0 
@@ -494,18 +549,17 @@ class Aliengo:
         return relative_z_heights.reshape((grid_len, grid_len))
 
 
-    def _is_non_foot_ground_contact(self): #TODO if I ever use this in this env, account for stepping stone contact
-        """Detect if any parts of the robot, other than the feet, are touching the ground."""
+    def _is_non_foot_ground_contact(self): 
+        """Detect if any parts of the robot, other than the feet, are touching the ground. Returns number of non-foot
+        contacts."""
 
-        raise NotImplementedError
-        contact = False
-        for i in range(self.num_joints):
+        num_contact_points = 0
+        for i in range(self.num_links):
             if i in self.foot_links: # the feet themselves are allow the touch the ground
                 continue
-            points = self.client.getContactPoints(self.quadruped, self.plane, linkIndexA=i)
-            if len(points) != 0:
-                contact = True
-        return contact
+            points = self.client.getContactPoints(bodyA=self.quadruped, linkIndexA=i)
+            num_contact_points += len(points)
+        return num_contact_points
 
 
     def load_urdf(self, fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0]):
@@ -689,7 +743,10 @@ class Aliengo:
                                     positionGains=self.kp * np.ones(12),
                                     velocityGains=self.kd * np.ones(12))
 
-        return self._get_foot_frame_foot_positions()
+
+
+        self.foot_target_history = [self._get_foot_frame_foot_positions()] * 3
+        return self.foot_target_history[0]
 
 
 def sine_tracking_test(client, quadruped):
@@ -853,6 +910,7 @@ if __name__ == '__main__':
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
+
     while True:
         quadruped.get_privledged_terrain_info(client)
         client.stepSimulation()

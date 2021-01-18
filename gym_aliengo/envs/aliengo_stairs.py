@@ -269,7 +269,7 @@ class AliengoStairs(gym.Env):
 
         self.t = self.eps_step_counter * self.n_hold_frames / 240.
 
-        self.foot_normal_forces = self.quadruped._get_foot_contacts()
+        self.foot_normal_forces = self.quadruped.get_foot_contacts()
         
         self.state = np.concatenate((self.applied_torques, 
                                     self.joint_positions,
