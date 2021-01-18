@@ -89,7 +89,7 @@ class Aliengo:
         torque_rew = -np.linalg.norm(applied_torques, 1)
         
         return 0.05 * lin_vel_rew + 0.04 * base_motion_rew + 0.02 * body_collision_rew + 0.025 * target_smoothness_rew \
-                        2e-5 * torque_rew
+                        + 2e-5 * torque_rew
 
     
     def _init_vis(self):
@@ -288,7 +288,7 @@ class Aliengo:
 
         assert foot_positions.shape == (4,3)
         self.foot_target_history.pop()
-        self.foot_target_history.insert(foot_positions, 0) 
+        self.foot_target_history.insert(0, foot_positions) 
         
         commanded_global_foot_positions = self._foot_frame_pos_to_global(foot_positions) 
 
