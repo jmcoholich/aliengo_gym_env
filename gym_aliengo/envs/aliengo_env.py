@@ -158,11 +158,11 @@ class AliengoEnv(gym.Env):
 
         if self.eps_step_counter == 1:
             for key in rew_dict:  
-                self.mean_rew_dict['mean' + key] = rew_dict[key]
+                self.mean_rew_dict['mean_' + key] = rew_dict[key]
         elif self.eps_step_counter > 1:
             for key in rew_dict:
-                self.mean_rew_dict['mean' + key] += \
-                                        (rew_dict[key] - self.mean_rew_dict['mean' + key])/float(self.eps_step_counter)
+                self.mean_rew_dict['mean_' + key] += \
+                                        (rew_dict[key] - self.mean_rew_dict['mean_' + key])/float(self.eps_step_counter)
         else:
             assert False
             
