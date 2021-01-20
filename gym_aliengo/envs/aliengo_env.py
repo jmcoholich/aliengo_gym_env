@@ -17,91 +17,92 @@ for joint torques. '''
 
 
 class AliengoEnv(gym.Env):
-    def __init__(self, render=False, realTime=False, use_pmtg=True):
+    def __init__(self, 
+                    render=False, 
+                    use_pmtg=True,
+                    apply_perturb=True,
+                    avg_time_per_perturb=5.0, # seconds
+                    max_torque=40.0, # N-m
+                    kp=0.1, # acts on position erorr
+                    kd=1.0, # acts on rate of position erorr
+                    action_repeat=4,
+                    timeout=20.0, # number of seconds to timeout after
+                    realTime=False): # should never be True when training, only for visualzation or debugging MAYBE
         # Environment Options
-        self._apply_perturbations = False
-        self.perturbation_rate = 0.00 # probability that a random perturbation is applied to the torso
-        self.max_torque = 40.0 
-        self.kp = 0.1
-        self.kd = 1.0
-        self.n_hold_frames = 4
-        self._is_render = render
-        self.eps_timeout = 240.0/self.n_hold_frames * 20 # number of steps to timeout after
         self.use_pmtg = use_pmtg
-        self.speed_clipping = 2.0 # "...maximum walking speed exceeds 1.5 m/s" https://www.unitree.com/products/aliengo
+        self.apply_perturb = apply_perturb
+        self.avg_time_per_perturb = avg_time_per_perturb # average time in seconds between perturbations 
+        self.n_hold_frames = action_repeat
+        self.eps_timeout = 240.0/self.n_hold_frames * timeout # number of steps to timeout after
+        # if U[0, 1) is less than this, perturb
+        self.perturb_p = 1.0/(self.avg_time_per_perturb * 240.0) * self.n_hold_frames
 
 
-        if self._is_render:
+        if render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
         else:
             self.client = bc.BulletClient(connection_mode=p.DIRECT)
 
-        if self.client == -1:
+        if self.client == -1: # not 100% sure that BulletClient class works like this, but will leave this here for now
             raise RuntimeError('Pybullet could not connect to physics client')
 
         self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
-                                        max_torque=self.max_torque, 
-                                        kp=self.kp, 
-                                        kd=self.kd)
-
+                                            max_torque=max_torque, 
+                                            kp=kp, 
+                                            kd=kd)
         self.client.setGravity(0,0,-9.8)
         if realTime:
             warnings.warn('\n\n' + '#'*100 + '\nExternal force/torque disturbances will NOT work properly with '
                             'real time pybullet GUI enabled.\n' + '#'*100 + '\n') # how to make this warning yellow?
         self.client.setRealTimeSimulation(realTime) # this has no effect in DIRECT mode, only GUI mode
-        self.client.setTimeStep(1/240.)
+        self.client.setTimeStep(1/240.0)
 
         if self.use_pmtg:
             # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
             # Note that the (more advanced) Hutter implementation uses a larger state. For flat ground this is fine. 
             # Also see the original PMTG paper: https://arxiv.org/pdf/1910.02812.pdf
-            self.state_space_dim = 8 + 4 + 12 # 18 
-            self.action_space_dim = 16 # 4 frequency adjustments per leg, 12 position residuals (xyz per leg)
-            self.action_lb, self.action_ub = self.quadruped.get_pmtg_bounds() 
+            # self.state_space_dim = 8 + 4 + 12 # 18 
+            # self.action_space_dim = 16 # 4 frequency adjustments per leg, 12 position residuals (xyz per leg)
+            self.action_lb, self.action_ub = self.quadruped.get_pmtg_action_bounds() 
+            observation_lb, observation_ub = self.quadruped.get_pmtg_observation_bounds()
             self.t = 0.0
-            self.last_foot_position_command = np.zeros((4,3)) # This will actually be initialized when reset() is called
-            self.phases = np.zeros(4)
+            # self.last_foot_position_command = np.zeros((4,3)) # This will actually be initialized when reset() is called
+            # self.phases = np.zeros(4)
         else:
             # (50) applied torque, pos, and vel for each motor, base orientation (quaternions), foot normal forces,
             # cartesian base acceleration, base angular velocity
-            self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 
-            self.action_space_dim = 12 # This is the number of Aliengo motors (3 per leg)
+            # self.state_space_dim = 12 * 3 + 4 + 4 + 3 + 3 
+            # self.action_space_dim = 12 # This is the number of Aliengo motors (3 per leg)
             self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
-        self.num_joints = 18 # This includes fixed joints from the URDF
+            observation_lb, observation_ub = self.quadruped.get_observation_bounds()
 
-        self.state = np.zeros(self.state_space_dim) 
-        self.applied_torques = np.zeros(12)
-        self.joint_velocities = np.zeros(12)
-        self.joint_positions = np.zeros(12)
-        self.base_orientation = np.zeros(4)
-        self.foot_normal_forces = np.zeros(4)
-        self.cartesian_base_accel = np.zeros(3) 
-        self.base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
-        self.previous_base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
-        self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
+        # self.state = np.zeros(self.state_space_dim) 
+        # self.applied_torques = np.zeros(12)
+        # self.joint_velocities = np.zeros(12)
+        # self.joint_positions = np.zeros(12)
+        # self.base_orientation = np.zeros(4)
+        # self.foot_normal_forces = np.zeros(4)
+        # self.cartesian_base_accel = np.zeros(3) 
+        # self.base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
+        # self.previous_base_twist = np.zeros(6) # used to calculate accelerations, angular vel included in state
+        # self.base_position = np.zeros(3) # not returned as observation, but used for calculating reward or termination
         self.eps_step_counter = 0 # Used for triggering timeout
-
-        self.reward = 0 # this is to store most recent reward
-        self.mean_torque_squared = 0 # online avg
-        self.mean_x_vel = 0 # online avg
-        # TODO add this^ to other envs
-            
+        self.mean_rew_dict = {} # used for logging the mean reward terms at the end of each episode
         self.action_space = spaces.Box(
             low=self.action_lb,
             high=self.action_ub,
             dtype=np.float32
             )
-        observation_lb, observation_ub = self._find_space_limits() # this function includes logic for self.use_pmtg
         self.observation_space = spaces.Box(
             low=observation_lb,
             high=observation_ub,
             dtype=np.float32
             )
+        # observation_lb, observation_ub = self._find_space_limits() # this function includes logic for self.use_pmtg
 
 
     def step(self, action):
-        # action = np.clip(action, self.action_space.low, self.action_space.high)
         DELTA = 0.01
         if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
             print("Action passed to env.step(): ", action)
@@ -110,66 +111,80 @@ class AliengoEnv(gym.Env):
         if self.use_pmtg:
             f = action[:4]
             residuals = action[4:].reshape((4,3))
-            self.phases, self.last_foot_position_command = self.quadruped.set_trajectory_parameters(self.t, 
-                                                                                                    f=f, 
-                                                                                                    residuals=residuals)
+            self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
             self.t += 1./240. * self.n_hold_frames
         else:
             self.quadruped.set_joint_position_targets(action)
 
-        if (np.random.rand() > self.perturbation_rate) and self._apply_perturbations: 
-            raise NotImplementedError
-            self._apply_perturbation()
-        for _ in range(self.n_hold_frames):
-            self.client.stepSimulation()
+        if (np.random.rand() < self.perturb_p) and self.apply_perturb: 
+            '''TODO eventually make disturbance generating function that applies disturbances for multiple timesteps'''
+            if np.random.rand() > 0.5:
+                # TODO returned values will be part of privledged information for teacher training
+                force, foot = self.quadruped.apply_foot_disturbance() 
+            else:
+                # TODO returned values will be part of privledged information for teacher training
+                wrench = self.quadruped.apply_torso_disturbance()
+
+        for _ in range(self.n_hold_frames): self.client.stepSimulation()
         self.eps_step_counter += 1
-        self.quadruped.update_state() #TODO there are no state variables of the simulation I believe 
+        self.quadruped.update_state()
+
         if self.use_pmtg:
-            self.obs = self.quadruped.get_pmtg_observation()
+            obs = self.quadruped.get_pmtg_observation()
         else:
-            self.obs = self.quadruped.get_observation()
+            obs = self.quadruped.get_observation()
 
         info = {}
         done, termination_dict = self._is_state_terminal() # this must come after self._update_state()
-        info.extend(termination_dict)
+        info.extend(termination_dict) # termination_dict is an empty dict if not done
 
         if self.use_pmtg:
             rew, rew_dict = self.quadruped.pmtg_reward()
         else:
-            raise NotImplementedError 
-            rew, rew_dict = self.quadruped.reward() #TODO
-        info.extend(rew_dict)
+            raise NotImplementedError
+            rew, rew_dict = self.quadruped.reward()
+        self._update_mean_rew_dict(rew_dict)
 
-        self.mean_torque_squared += (torque_penalty - self.mean_torque_squared)/self.eps_step_counter 
-        self.mean_x_vel += (self.base_twist[0] - self.mean_x_vel)/self.eps_step_counter
-
-        # info = {'':''} # this is returned so that env.step() matches Open AI gym API 
         if done:
-            info['mean_torque_squared'] = self.mean_torque_squared
-            info['distance_traveled'] = self.base_position[0]
-            info['mean_x_vel'] = self.mean_x_vel
+            info['distance_traveled']   = self.quadruped.base_position[0]
+            info.extend(self.mean_rew_dict)
 
-        return self.state, self.reward, done, info
+        return obs, rew, done, info
 
-        
+
+    def _update_mean_rew_dict(self, rew_dict):
+        '''Update self.mean_rew_dict, which keeps a running average of all terms of the reward. At the end of the 
+        episode, the average will be logged. '''
+
+        if self.eps_step_counter == 1:
+            for key in rew_dict:  
+                self.mean_rew_dict['mean' + key] = rew_dict[key]
+        elif self.eps_step_counter > 1:
+            for key in rew_dict:
+                self.mean_rew_dict['mean' + key] += \
+                                        (rew_dict[key] - self.mean_rew_dict['mean' + key])/float(self.eps_step_counter)
+        else:
+            assert False
+            
+
     def reset(self): 
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
-        prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
-        to ground and settle completely.'''
+        prevent the robot from jumping/falling on first user command. '''
 
-        self.eps_step_counter = 0 # TODO do this in other envs
+        self.eps_step_counter = 0
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,0.48], 
                                             ornObj=[0,0,0,1.0]) 
 
-        foot_positions = self.quadruped.reset_joint_positions(stochastic=True) 
+        self.quadruped.reset_joint_positions(stochastic=True) 
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
         if self.use_pmtg:
             self.t = 0.0
-            self.last_foot_position_command = foot_positions 
-        self._update_state()
-        return self.state
+            obs = self.quadruped.get_pmtg_observation()
+        else:
+            obs = self.quadruped.get_observation()
+        return obs
 
 
     def render(self, mode='human'):
@@ -182,38 +197,38 @@ class AliengoEnv(gym.Env):
         pass
 
 
-    def _find_space_limits(self):
-        ''' find upper and lower bounds of action and observation spaces''' 
+    # def _find_space_limits(self):
+    #     ''' find upper and lower bounds of action and observation spaces''' 
 
-        if self.use_pmtg:
-            # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
-            # Note that the (more advanced) Hutter implementation uses a larger state. For flat ground simple is fine.
-            # 4D IMU data is pitch, roll, pitch rate, roll rate.
-            observation_ub = np.concatenate((np.ones(8), 
-                                                np.array([np.pi, np.pi, 1e5, 1e5]), # pitch, roll, pitch rate, roll rate
-                                                np.ones(12)*2)) # last foot position commands
-            return -observation_ub, observation_ub
-        else:
-            torque_lb, torque_ub = self.quadruped.get_joint_torque_bounds()
-            position_lb, position_ub = self.quadruped.get_joint_position_bounds()
-            velocity_lb, velocity_ub = self.quadruped.get_joint_velocity_bounds()
-            observation_lb = np.concatenate((torque_lb, 
-                                            position_lb,
-                                            velocity_lb, 
-                                            -0.78 * np.ones(4), # this is for base orientation in quaternions
-                                            np.zeros(4), # foot normal forces
-                                            -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
-                                            -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
+    #     if self.use_pmtg:
+    #         # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+    #         # Note that the (more advanced) Hutter implementation uses a larger state. For flat ground simple is fine.
+    #         # 4D IMU data is pitch, roll, pitch rate, roll rate.
+    #         observation_ub = np.concatenate((np.ones(8), 
+    #                                             np.array([np.pi, np.pi, 1e5, 1e5]), # pitch, roll, pitch rate, roll rate
+    #                                             np.ones(12)*2)) # last foot position commands
+    #         return -observation_ub, observation_ub
+    #     else:
+    #         torque_lb, torque_ub = self.quadruped.get_joint_torque_bounds()
+    #         position_lb, position_ub = self.quadruped.get_joint_position_bounds()
+    #         velocity_lb, velocity_ub = self.quadruped.get_joint_velocity_bounds()
+    #         observation_lb = np.concatenate((torque_lb, 
+    #                                         position_lb,
+    #                                         velocity_lb, 
+    #                                         -0.78 * np.ones(4), # this is for base orientation in quaternions
+    #                                         np.zeros(4), # foot normal forces
+    #                                         -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
+    #                                         -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
 
-            observation_ub = np.concatenate((torque_ub, 
-                                            position_ub, 
-                                            velocity_ub, 
-                                            0.78 * np.ones(4),
-                                            1e4 * np.ones(4), # arbitrary bound
-                                            1e5 * np.ones(3),
-                                            1e5 * np.ones(3)))
+    #         observation_ub = np.concatenate((torque_ub, 
+    #                                         position_ub, 
+    #                                         velocity_ub, 
+    #                                         0.78 * np.ones(4),
+    #                                         1e4 * np.ones(4), # arbitrary bound
+    #                                         1e5 * np.ones(3),
+    #                                         1e5 * np.ones(3)))
 
-            return observation_lb, observation_ub
+    #         return observation_lb, observation_ub
                 
 
     # def _reward_function(self) -> float:
@@ -229,47 +244,49 @@ class AliengoEnv(gym.Env):
     #     return base_x_velocity - 0.0001 * torque_penalty, rew_terms_dict 
 
 
-    def _is_state_terminal(self) -> bool:
+    def _is_state_terminal(self):
+        quadruped_done, termination_dict = self.quadruped.is_state_terminal()
+        timeout = (self.eps_step_counter >= self.eps_timeout) 
+        if timeout:
+            termination_dict['TimeLimit.truncated'] = True
+        done = quadruped_done or timeout
+        return done, termination_dict
         
-        return self.quadruped.is_state_terminal()
         
-        
+    # def _update_state(self):
 
+    #     self.joint_positions, self.joint_velocities, _, self.applied_torques = self.quadruped.get_joint_states()
+    #     self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
+    #     self.base_twist = self.quadruped.get_base_twist()
+    #     self.cartesian_base_accel = (self.base_twist[:3] - self.previous_base_twist[:3])/(1.0/240 * self.n_hold_frames)
+    #     self.foot_normal_forces = self.quadruped.get_foot_contacts()
 
-    def _update_state(self):
-
-        self.joint_positions, self.joint_velocities, _, self.applied_torques = self.quadruped.get_joint_states()
-        self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
-        self.base_twist = self.quadruped.get_base_twist()
-        self.cartesian_base_accel = (self.base_twist[:3] - self.previous_base_twist[:3])/(1.0/240 * self.n_hold_frames)
-        self.foot_normal_forces = self.quadruped.get_foot_contacts()
-
-        if self.use_pmtg:
-            # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
-            imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], 
-                                    self.base_twist[3:-1]))
-            # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
-            imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
-            self.state = np.concatenate((np.sin(self.phases),
-                                            np.cos(self.phases),
-                                            imu,
-                                            self.last_foot_position_command.flatten()))
-        else:
-            self.state = np.concatenate((self.applied_torques, 
-                                            self.joint_positions,
-                                            self.joint_velocities,
-                                            self.base_orientation,
-                                            self.foot_normal_forces,
-                                            self.cartesian_base_accel,
-                                            self.base_twist[3:])) # last item is base angular velocity
+    #     if self.use_pmtg:
+    #         # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+    #         imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], 
+    #                                 self.base_twist[3:-1]))
+    #         # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
+    #         imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
+    #         self.state = np.concatenate((np.sin(self.phases),
+    #                                         np.cos(self.phases),
+    #                                         imu,
+    #                                         self.last_foot_position_command.flatten()))
+    #     else:
+    #         self.state = np.concatenate((self.applied_torques, 
+    #                                         self.joint_positions,
+    #                                         self.joint_velocities,
+    #                                         self.base_orientation,
+    #                                         self.foot_normal_forces,
+    #                                         self.cartesian_base_accel,
+    #                                         self.base_twist[3:])) # last item is base angular velocity
         
 
-        if np.isnan(self.state).any():
-            print('nans in state')
-            breakpoint()
+    #     if np.isnan(self.state).any():
+    #         print('nans in state')
+    #         breakpoint()
 
-        # Not used in state, but used in _is_terminal() and _reward()    
-        self.previous_base_twist = self.base_twist
+    #     # Not used in state, but used in _is_terminal() and _reward()    
+    #     self.previous_base_twist = self.base_twist
     
 
 if __name__ == '__main__':

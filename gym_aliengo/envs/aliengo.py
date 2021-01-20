@@ -9,12 +9,19 @@ import os
 import time
 
 class Aliengo:
-    def __init__(self, pybullet_client, max_torque=40.0, kd=1.0, kp=0.1, 
-                    fixed=False, fixed_position=[0,0,1.0], fixed_orientation=[0,0,0], vis=False):
+    def __init__(self, 
+                    pybullet_client, 
+                    max_torque=40.0, 
+                    kp=0.1, 
+                    kd=1.0, 
+                    fixed=False, 
+                    fixed_position=[0,0,1.0], 
+                    fixed_orientation=[0,0,0], 
+                    vis=False):
+        self.max_torque = max_torque
         self.kp = kp
         self.kd = kd
         self.client = pybullet_client
-        self.max_torque = max_torque
         self.n_motors = 12
 
         self.foot_links = [5, 9, 13, 17]
@@ -57,6 +64,10 @@ class Aliengo:
         self.state_is_updated = False # flag to prevent multiple calls of observation functions without a state update
         # in between. (Currently, I can't think of any situation where you would do that.)
 
+        # observation variables
+        self.last_foot_position_command = None # I want an error to be thrown if this is added to obs without being set 
+        self.phases = None
+
         '''For use in calculating smoothness reward.
         NOTE self.reset_joint_positions() should be called before pmtg_reward is to initialize this variable. 
         Most recent foot position target will be at index 0. Position targets are in foot frame, not global.'''
@@ -69,7 +80,6 @@ class Aliengo:
 
         termination_dict = {}
 
-        timeout = (self.eps_step_counter >= self.eps_timeout)
         base_z_position = self.base_position[2]
         height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8)) 
         falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > \
@@ -79,10 +89,8 @@ class Aliengo:
             termination_dict['termination_reason'] = 'falling'
         elif height_out_of_bounds:
             termination_dict['termination_reason'] = 'height_out_of_bounds'
-        elif timeout: # {'TimeLimit.truncated': True}
-            termination_dict['TimeLimit.truncated'] = True
 
-        return any([falling, height_out_of_bounds, timeout]), termination_dict
+        return any([falling, height_out_of_bounds]), termination_dict
 
 
     def update_state(self):
@@ -102,25 +110,59 @@ class Aliengo:
 
 
     def get_pmtg_observation(self):
-        '''Returns the observation for PMTG'''
+        '''Returns the observation for PMTG control. Observation consists of sin(phase) and cos(phase) for each leg, 
+        4D IMU data, last position targets'''
 
-
-        # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
-
-        imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], 
-                                    self.base_twist[3:-1]))
+        if not self.state_is_updated:
+            raise
+        imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], self.base_twist[3:-1]))
         # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
         imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
         observation = np.concatenate((np.sin(self.phases),
-                                        np.cos(self.phases),
-                                        imu,
-                                        self.last_foot_position_command.flatten()))
+                                    np.cos(self.phases), # TODO self.phases variable doesn't exist
+                                    imu,
+                                    self.last_foot_position_command.flatten()))
         self.state_is_updated = False
         return observation
+
+    
+    def get_pmtg_observation_bounds(self):
+        '''Observation consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets. 
+        Bounds for IMU and last foot position commands are somewhat guesses. I don't think it matters much. '''
+
+        observation_ub = np.concatenate((np.ones(8), 
+                                        np.array([np.pi/2.0, np.pi/2.0, 1e5, 1e5]), # pitch, roll, pitch rate, roll rate
+                                        np.ones(12)*2)) # last foot position commands
+        return -observation_ub, observation_ub
+
+    
+    def get_observation_bounds(self):
+        raise NotImplementedError
+        torque_lb, torque_ub = self.get_joint_torque_bounds()
+        position_lb, position_ub = self.get_joint_position_bounds()
+        velocity_lb, velocity_ub = self.get_joint_velocity_bounds()
+        observation_lb = np.concatenate((torque_lb, 
+                                        position_lb,
+                                        velocity_lb, 
+                                        -0.78 * np.ones(4), # this is for base orientation in quaternions
+                                        np.zeros(4), # foot normal forces
+                                        -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
+                                        -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
+
+        observation_ub = np.concatenate((torque_ub, 
+                                        position_ub, 
+                                        velocity_ub, 
+                                        0.78 * np.ones(4),
+                                        1e4 * np.ones(4), # arbitrary bound
+                                        1e5 * np.ones(3),
+                                        1e5 * np.ones(3)))
+
+        return observation_lb, observation_ub
     
 
     def get_observation(self):
-
+        
+        raise NotImplementedError
         self.state = np.concatenate((self.applied_torques, 
                                             self._positions_to_actions(self.joint_positions),
                                             self.joint_velocities,
@@ -146,7 +188,6 @@ class Aliengo:
          "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
 
         '''
-
         speed_treshold = 1.8 # m/s
         base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
         lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
@@ -167,9 +208,17 @@ class Aliengo:
         joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
         applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
         torque_rew = -np.linalg.norm(applied_torques, 1)
-        
+
+        # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
+        # add terms of reward function
+        rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
+                        'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
+                        'torque_rew':torque_rew}
+        # other stuff to track
+        rew_dict['x_vel'] = self.base_vel[0]
+
         return 0.05 * lin_vel_rew + 0.04 * base_motion_rew + 0.02 * body_collision_rew + 0.025 * target_smoothness_rew \
-                        + 2e-5 * torque_rew
+                        + 2e-5 * torque_rew, rew_dict
 
     
     def _init_vis(self):
@@ -269,6 +318,7 @@ class Aliengo:
         assert residuals.shape == (4,3)
         trot_phase_offsets = np.array([0, np.pi, np.pi, 0])
         phases = (trot_phase_offsets + (f0 + f) * 2 * np.pi * t) % (2 * np.pi)
+        self.phases = phases
 
         foot_positions = np.zeros((4, 3))
         for i in range(4):
@@ -280,15 +330,17 @@ class Aliengo:
         foot_positions[:,0] = x_offset
         foot_positions += residuals
         self.set_foot_positions(foot_positions, debug=debug)
-        return phases, foot_positions # this is returned just to check tracking performance and for use as obs in envs
+        return phases, foot_positions # foot positions is the command in foot frame space
 
 
-    def get_pmtg_bounds(self):
-        '''Returns bounds of actions to set_trajectory_parameters. I know really know what these should be. (I don't
+    def get_pmtg_action_bounds(self):
+        '''Returns bounds of actions to set_trajectory_parameters. I don't really know what these should be. (I don't
         think it matters.)'''
 
-        ub = np.array([0.2] * 4 + [0.5] * 12) # frequencies, then residuals #TODO this is probably too tight for freq
-        return -ub, ub
+        # frequency adjustments, then foot position residuals
+        lb = np.array([-2] * 4 + [-0.5] * 12) 
+        ub = np.array([1.0] * 4 + [0.5] * 12) 
+        return lb, ub
 
 
     def _foot_step_traj(self, phase):
@@ -387,8 +439,11 @@ class Aliengo:
         #                                             targetPositions=commanded_global_foot_positions))
         self.set_joint_position_targets(joint_positions, true_positions=True)
 
+        self.last_foot_position_command = foot_positions
+
         if debug:
             self.visualize(commanded_global_foot_positions=commanded_global_foot_positions)
+        
            
 
     def visualize(self, commanded_global_foot_positions=None): #TODO make visualize a constructor kwarg
@@ -961,7 +1016,7 @@ def test_disturbances(client, quadruped):
     counter = 0
     flag = True
     while True:
-        if counter%10 == 0:
+        if counter%100 == 0:
             if flag:
                 print(quadruped.apply_torso_disturbance())#wrench=[1e10]*6))
                 flag = False
@@ -989,9 +1044,9 @@ if __name__ == '__main__':
     # floor_tracking_test(client, quadruped)
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
-    # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
+    test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
 
-    while True:
-        quadruped.get_privledged_terrain_info(client)
-        client.stepSimulation()
-        time.sleep(1/240.)
+    # while True:
+    #     quadruped.get_privledged_terrain_info(client)
+    #     client.stepSimulation()
+    #     time.sleep(1/240.)
