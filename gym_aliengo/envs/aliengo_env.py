@@ -179,6 +179,7 @@ class AliengoEnv(gym.Env):
         self.quadruped.reset_joint_positions(stochastic=True) 
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
+        self.quadruped.update_state()
         if self.use_pmtg:
             self.t = 0.0
             obs = self.quadruped.get_pmtg_observation()
