@@ -106,7 +106,7 @@ class Aliengo:
         temp = self.client.getBasePositionAndOrientation(self.quadruped)
         self.base_position, self.base_orientation = (np.array(temp[0]), np.array(temp[1]))
         self.base_vel, self.base_avel = self.client.getBaseVelocity(self.quadruped)
-        self.foot_normal_forces = self.quadruped.get_foot_contacts()
+        self.foot_normal_forces = self.get_foot_contacts()
         self.state_is_updated = True
 
 
