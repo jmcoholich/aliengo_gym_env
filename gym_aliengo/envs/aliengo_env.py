@@ -136,7 +136,7 @@ class AliengoEnv(gym.Env):
 
         info = {}
         done, termination_dict = self._is_state_terminal() # this must come after self._update_state()
-        info.extend(termination_dict) # termination_dict is an empty dict if not done
+        info.update(termination_dict) # termination_dict is an empty dict if not done
 
         if self.use_pmtg:
             rew, rew_dict = self.quadruped.pmtg_reward()
@@ -147,7 +147,7 @@ class AliengoEnv(gym.Env):
 
         if done:
             info['distance_traveled']   = self.quadruped.base_position[0]
-            info.extend(self.mean_rew_dict)
+            info.update(self.mean_rew_dict)
 
         return obs, rew, done, info
 

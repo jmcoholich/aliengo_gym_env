@@ -65,8 +65,10 @@ class Aliengo:
         # in between. (Currently, I can't think of any situation where you would do that.)
 
         # observation variables
-        self.last_foot_position_command = None # I want an error to be thrown if this is added to obs without being set 
-        self.phases = None
+        # the issue is that these are not determined by self.update_state(). I could figure out self.last_foot_position
+        # command by back_calculating the foot position, which ASSUMES that robot joint positions are reset at start 
+        # of episode. I can update phases the same way, just setting them to the phase when t = 0. 
+        self.phases = None # the issue is that this is not initialized when 
 
         '''For use in calculating smoothness reward.
         NOTE self.reset_joint_positions() should be called before pmtg_reward is to initialize this variable. 
@@ -116,13 +118,13 @@ class Aliengo:
 
         if not self.state_is_updated:
             raise
-        imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], self.base_twist[3:-1]))
+        imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], self.base_avel[:-1]))
         # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
         imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
         observation = np.concatenate((np.sin(self.phases),
-                                    np.cos(self.phases), # TODO self.phases variable doesn't exist
+                                    np.cos(self.phases), 
                                     imu,
-                                    self.last_foot_position_command.flatten()))
+                                    self.foot_target_history[0].flatten()))
         self.state_is_updated = False
         return observation
 
@@ -439,8 +441,6 @@ class Aliengo:
         #                                             self.foot_links,
         #                                             targetPositions=commanded_global_foot_positions))
         self.set_joint_position_targets(joint_positions, true_positions=True)
-
-        self.last_foot_position_command = foot_positions
 
         if debug:
             self.visualize(commanded_global_foot_positions=commanded_global_foot_positions)
@@ -845,6 +845,8 @@ class Aliengo:
     def reset_joint_positions(self, positions=None, stochastic=True):
         '''This ignores any physics or controllers and just overwrites joint positions to the given value. 
         Returns the foot positions in foot frame, for use as an initial observation in PMTG controllers. 
+        NOTE: I am assuming that this function is always called during env.reset(). I am using it to 
+        initialize self.foot_target_history and self.phases
         ''' 
 
         if positions: 
@@ -882,6 +884,7 @@ class Aliengo:
 
 
         self.foot_target_history = [self._get_foot_frame_foot_positions()] * 3
+        self.phases = np.array([0, np.pi, np.pi, 0])
         return self.foot_target_history[0]
 
 
