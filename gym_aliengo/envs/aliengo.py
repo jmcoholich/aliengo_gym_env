@@ -104,7 +104,7 @@ class Aliengo:
         self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
 
         self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
-        self.base_vel, self.base_avel = self.quadruped.getBaseVelocity(self.quadruped)
+        self.base_vel, self.base_avel = self.client.getBaseVelocity(self.quadruped)
         self.foot_normal_forces = self.quadruped.get_foot_contacts()
         self.state_is_updated = True
 
