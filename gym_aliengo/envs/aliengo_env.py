@@ -123,9 +123,23 @@ class AliengoEnv(gym.Env):
         for _ in range(self.n_hold_frames):
             self.client.stepSimulation()
         self.eps_step_counter += 1
-        self._update_state()
-        done, info = self._is_state_terminal() # this must come after self._update_state()
-        self.reward, torque_penalty = self._reward_function() # this must come after self._update_state()
+        self.quadruped.update_state() #TODO there are no state variables of the simulation I believe 
+        if self.use_pmtg:
+            self.obs = self.quadruped.get_pmtg_observation()
+        else:
+            self.obs = self.quadruped.get_observation()
+
+        info = {}
+        done, termination_dict = self._is_state_terminal() # this must come after self._update_state()
+        info.extend(termination_dict)
+
+        if self.use_pmtg:
+            rew, rew_dict = self.quadruped.pmtg_reward()
+        else:
+            raise NotImplementedError 
+            rew, rew_dict = self.quadruped.reward() #TODO
+        info.extend(rew_dict)
+
         self.mean_torque_squared += (torque_penalty - self.mean_torque_squared)/self.eps_step_counter 
         self.mean_x_vel += (self.base_twist[0] - self.mean_x_vel)/self.eps_step_counter
 
@@ -202,35 +216,24 @@ class AliengoEnv(gym.Env):
             return observation_lb, observation_ub
                 
 
-    def _reward_function(self) -> float:
-        ''' Calculates reward based off of current state. Uses reward clipping on speed. '''
+    # def _reward_function(self) -> float:
+    #     ''' Calculates reward based off of current state. Uses reward clipping on speed. '''
 
-        base_x_velocity = np.clip(self.base_twist[0], -np.inf, self.speed_clipping)
-        torque_penalty = (self.applied_torques * self.applied_torques).mean() # TODO do in other envs
-        return base_x_velocity - 0.0001 * torque_penalty, torque_penalty #TODO return value of torque penalty and distance traveled etc
-        # TODO return torque penality without the coefficient, so I can compare values objectively, even if I later change
-        # the coefficient # change the baseline Kostrikov to just log any extra shid in the returned info dict
+    #     # base_x_velocity = np.clip(self.base_twist[0], -np.inf, self.speed_clipping)
+    #     # torque_penalty = (self.applied_torques * self.applied_torques).mean() 
+    #     if self.use_pmtg: 
+    #         return self.quadruped.pmtg_reward()
+    #     else:
+    #         raise NotImplementedError
+    #         rew, rew_terms_dict = self.quadruped.reward() #TODO
+    #     return base_x_velocity - 0.0001 * torque_penalty, rew_terms_dict 
 
 
     def _is_state_terminal(self) -> bool:
-        ''' Calculates whether to end current episode due to failure based on current state.
-        Returns boolean and puts reason in info if True '''
-        info = {}
-
-        timeout = (self.eps_step_counter >= self.eps_timeout)
-        base_z_position = self.base_position[2]
-        height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8)) 
-        falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > \
-                                                                                [np.pi/2., np.pi/4., np.pi/4.]).any()) 
-
-        if falling:
-            info['termination_reason'] = 'falling'
-        elif height_out_of_bounds:
-            info['termination_reason'] = 'height_out_of_bounds'
-        elif timeout: # {'TimeLimit.truncated': True}
-            info['TimeLimit.truncated'] = True
-
-        return any([falling, height_out_of_bounds, timeout]), info
+        
+        return self.quadruped.is_state_terminal()
+        
+        
 
 
     def _update_state(self):

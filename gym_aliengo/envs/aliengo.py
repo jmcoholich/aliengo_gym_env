@@ -43,11 +43,91 @@ class Aliengo:
         if vis:
             self._init_vis()
 
+        # state variables
+        self.joint_positions  = np.zeros(12)
+        self.joint_velocities = np.zeros(12)
+        self.reaction_forces  = np.zeros(12)
+        self.applied_torques  = np.zeros(12)
+
+        self.base_position = np.zeros(3)
+        self.base_orientation = np.zeros(4)
+        self.base_vel = np.zeros(3) 
+        self.base_avel = np.zeros(3)
+        self.foot_normal_forces = np.zeros(4)
+        self.state_is_updated = False # flag to prevent multiple calls of observation functions without a state update
+        # in between. (Currently, I can't think of any situation where you would do that.)
 
         '''For use in calculating smoothness reward.
         NOTE self.reset_joint_positions() should be called before pmtg_reward is to initialize this variable. 
         Most recent foot position target will be at index 0. Position targets are in foot frame, not global.'''
         self.foot_target_history = [''] * 3
+
+
+    def is_state_terminal(self): 
+        ''' Calculates whether to end current episode due to failure based on current state.
+        Returns boolean and puts reason in info if True '''
+
+        termination_dict = {}
+
+        timeout = (self.eps_step_counter >= self.eps_timeout)
+        base_z_position = self.base_position[2]
+        height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8)) 
+        falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > \
+                                                                                [np.pi/2., np.pi/4., np.pi/4.]).any()) 
+
+        if falling:
+            termination_dict['termination_reason'] = 'falling'
+        elif height_out_of_bounds:
+            termination_dict['termination_reason'] = 'height_out_of_bounds'
+        elif timeout: # {'TimeLimit.truncated': True}
+            termination_dict['TimeLimit.truncated'] = True
+
+        return any([falling, height_out_of_bounds, timeout]), termination_dict
+
+
+    def update_state(self):
+        '''Updates state of the quadruped. This should be called once per env.step() and once per env.reset(). 
+        The state is not the same as the observation. Returns nothing.'''
+
+        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
+        self.joint_positions  = np.array([joint_states[i][0] for i in range(self.n_motors)]) 
+        self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
+        self.reaction_forces  = np.array([joint_states[i][2] for i in range(self.n_motors)])
+        self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
+
+        self.base_position, self.base_orientation = self.quadruped.get_base_position_and_orientation()
+        self.base_vel, self.base_avel = self.quadruped.getBaseVelocity(self.quadruped)
+        self.foot_normal_forces = self.quadruped.get_foot_contacts()
+        self.state_is_updated = True
+
+
+    def get_pmtg_observation(self):
+        '''Returns the observation for PMTG'''
+
+
+        # state space consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets
+
+        imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], 
+                                    self.base_twist[3:-1]))
+        # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
+        imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
+        observation = np.concatenate((np.sin(self.phases),
+                                        np.cos(self.phases),
+                                        imu,
+                                        self.last_foot_position_command.flatten()))
+        self.state_is_updated = False
+        return observation
+    
+
+    def get_observation(self):
+
+        self.state = np.concatenate((self.applied_torques, 
+                                            self._positions_to_actions(self.joint_positions),
+                                            self.joint_velocities,
+                                            self.base_orientation,
+                                            self.foot_normal_forces,
+                                            self.cartesian_base_accel,
+                                            self.base_twist[3:])) # last item is base angular velocity
 
 
     def pmtg_reward(self):
@@ -686,15 +766,15 @@ class Aliengo:
         return - np.ones(self.n_motors) * self.max_torque, np.ones(self.n_motors) * self.max_torque
 
     
-    def get_joint_states(self):
-        '''Note: Reaction forces will return all zeros unless a torque sensor has been set'''
+    # def get_joint_states(self):
+    #     '''Note: Reaction forces will return all zeros unless a torque sensor has been set'''
 
-        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
-        joint_positions  = self._positions_to_actions(np.array([joint_states[i][0] for i in range(self.n_motors)]))
-        joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
-        reaction_forces  = np.array([joint_states[i][2] for i in range(self.n_motors)])
-        applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
-        return joint_positions, joint_velocities, reaction_forces, applied_torques
+    #     joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
+    #     joint_positions  = self._positions_to_actions(np.array([joint_states[i][0] for i in range(self.n_motors)]))
+    #     joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
+    #     reaction_forces  = np.array([joint_states[i][2] for i in range(self.n_motors)])
+    #     applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
+    #     return joint_positions, joint_velocities, reaction_forces, applied_torques
 
 
     def get_base_position_and_orientation(self):
@@ -702,8 +782,8 @@ class Aliengo:
         return np.array(base_position), np.array(base_orientation)
     
     
-    def get_base_twist(self):
-        return np.array(self.client.getBaseVelocity(self.quadruped)).flatten()
+    # def get_base_twist(self):
+    #     return np.array(self.client.getBaseVelocity(self.quadruped)).flatten()
 
         
     def reset_joint_positions(self, positions=None, stochastic=True):
