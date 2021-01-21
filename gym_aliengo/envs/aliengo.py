@@ -341,8 +341,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-2] * 4 + [-0.5] * 12) 
-        ub = np.array([1.0] * 4 + [0.5] * 12) 
+        lb = np.array([-0.01] * 4 + [-0.2, -0.2, -0.2] * 4) # TODO
+        ub = np.array([0.01] * 4 + [0.2, 0.2, 0.2] * 4) 
         return lb, ub
 
 
@@ -558,7 +558,7 @@ class Aliengo:
             return
 
 
-    def apply_torso_disturbance(self, wrench=None, max_force_mag=5000, max_torque_mag=500): 
+    def apply_torso_disturbance(self, wrench=None, max_force_mag=50, max_torque_mag=5): # TODO took 1e2 off mags
         '''Applies a given wrench to robot torso, or defaults to a random wrench. Only lasts for one timestep.
         Returns the wrench that was applied.
         
@@ -576,7 +576,7 @@ class Aliengo:
         return wrench
 
 
-    def apply_foot_disturbance(self, force=None, foot=None, max_force_mag=2500):
+    def apply_foot_disturbance(self, force=None, foot=None, max_force_mag=25): # TODO took 1e2 off mags
         '''Applies a given force to a given foot, or defaults to random force applied to random foot. Only lasts for 
         one timestep. Returns force and foot applied to. 
         
