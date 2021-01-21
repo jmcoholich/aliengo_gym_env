@@ -76,16 +76,16 @@ class Aliengo:
         self.foot_target_history = [''] * 3
 
 
-    def is_state_terminal(self): 
+    def is_state_terminal(self, flipping_bounds=[np.pi/2., np.pi/4., np.pi/4.]): 
         ''' Calculates whether to end current episode due to failure based on current state.
-        Returns boolean and puts reason in info if True '''
+        Returns boolean and puts reason in info if True. Default flipping bounds work well for Aliengo-v0 because its 
+        flat and straight, but should be loosened for rough terain. '''
 
         termination_dict = {}
 
         base_z_position = self.base_position[2]
         height_out_of_bounds = ((base_z_position < 0.23) or (base_z_position > 0.8)) 
-        falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > \
-                                                                                [np.pi/2., np.pi/4., np.pi/4.]).any()) 
+        falling = ((abs(np.array(p.getEulerFromQuaternion(self.base_orientation))) > flipping_bounds).any()) 
 
         if falling:
             termination_dict['termination_reason'] = 'falling'

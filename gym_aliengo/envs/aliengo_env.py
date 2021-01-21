@@ -36,7 +36,12 @@ class AliengoEnv(gym.Env):
         self.eps_timeout = 240.0/self.n_hold_frames * timeout # number of steps to timeout after
         # if U[0, 1) is less than this, perturb
         self.perturb_p = 1.0/(self.avg_time_per_perturb * 240.0) * self.n_hold_frames
-
+        
+        # setting these to class variables so that child classes can use it as such. 
+        self.realTime = realTime 
+        self.max_torque = max_torque
+        self.kp = kp 
+        self.kd = kd
 
         if render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
@@ -52,10 +57,10 @@ class AliengoEnv(gym.Env):
                                             kp=kp, 
                                             kd=kd)
         self.client.setGravity(0,0,-9.8)
-        if realTime:
+        if self.realTime:
             warnings.warn('\n\n' + '#'*100 + '\nExternal force/torque disturbances will NOT work properly with '
                             'real time pybullet GUI enabled.\n' + '#'*100 + '\n') # how to make this warning yellow?
-        self.client.setRealTimeSimulation(realTime) # this has no effect in DIRECT mode, only GUI mode
+        self.client.setRealTimeSimulation(self.realTime) # this has no effect in DIRECT mode, only GUI mode
         self.client.setTimeStep(1/240.0)
 
         if self.use_pmtg:
@@ -188,8 +193,10 @@ class AliengoEnv(gym.Env):
         return obs
 
 
-    def render(self, mode='human'):
-        return self.quadruped.render(mode=mode, client=self.client)
+    def render(self, mode='human', client=None):
+        if client is None:
+            client = self.client
+        return self.quadruped.render(mode=mode, client=client)
 
 
     def close(self):
