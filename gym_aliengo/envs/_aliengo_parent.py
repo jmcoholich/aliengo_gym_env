@@ -21,6 +21,8 @@ class AliengoEnvParent(aliengo_env.AliengoEnv):
 
 
     def _hard_reset(self):
+        '''Resets the simulation, sets simulation parameters and loads plane into both clients.'''
+
         self.client.resetSimulation()
         self.fake_client.resetSimulation() 
     

@@ -172,13 +172,13 @@ class AliengoEnv(gym.Env):
             assert False
             
 
-    def reset(self): 
+    def reset(self, base_height=0.48): 
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. '''
 
         self.eps_step_counter = 0
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
-                                            posObj=[0,0,0.48], 
+                                            posObj=[0,0,base_height], 
                                             ornObj=[0,0,0,1.0]) 
 
         self.quadruped.reset_joint_positions(stochastic=True) 

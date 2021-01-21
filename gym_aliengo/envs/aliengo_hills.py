@@ -57,10 +57,6 @@ class AliengoHills(_aliengo_parent.AliengoEnvParent):
         # to not do a hard reset, but hard reset is necessary in the constructor 
 
     def reset(self, hard_reset=False):
-        '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
-        prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
-        to ground and settle completely.'''
-
         if hard_reset:
             self._hard_reset() # resets the simulation and reloads the plane
             self._create_hills(update=False)
@@ -70,7 +66,7 @@ class AliengoHills(_aliengo_parent.AliengoEnvParent):
                                             kd=self.kd)
         else: 
             self._create_hills(update=True)
-            
+
         return super().reset() # resets quadruped position (and a few other vars), updates state, returns observation
     
 
@@ -144,7 +140,8 @@ class AliengoHills(_aliengo_parent.AliengoEnvParent):
     def _is_state_terminal(self):
         ''' Adds condition for running out of terrain.'''
 
-        quadruped_done, termination_dict = self.quadruped.is_state_terminal(flipping_bounds=[np.pi/2.0]*3)
+        quadruped_done, termination_dict = self.quadruped.is_state_terminal(flipping_bounds=[np.pi/2.0]*3,
+                                                                            height_ub=self.hills_height + 0.8)
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
                     (self.base_position[0] >= self.hills_length - 0.5) # don't want it to fall off the end.
         y_out_of_bounds = not (-self.hills_width/2. < self.base_position[1] < self.hills_width/2.)
