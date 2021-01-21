@@ -9,7 +9,7 @@ import numpy as np
 import warnings
 from cv2 import putText, FONT_HERSHEY_SIMPLEX, imwrite, cvtColor, COLOR_RGB2BGR
 from gym_aliengo.envs import aliengo
-from gym_aliengo.envs import aliengo_env
+from gym_aliengo.envs import _aliengo_parent 
 from pybullet_utils import bullet_client as bc
 from noise import pnoise2
 from random import randint
@@ -19,7 +19,7 @@ Env for rolling hills, meant to replicate the Hills env used in this paper:
 https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 '''
 
-class AliengoHills(aliengo_env.AliengoEnv):
+class AliengoHills(_aliengo_parent.AliengoEnvParent):
 
     def __init__(self, 
                 scale=1.0, # good values range from 5.0 (easy) to 0.5 (hard)
@@ -48,20 +48,7 @@ class AliengoHills(aliengo_env.AliengoEnv):
         if self.scale == 1.0: # this causes terrain heights of all zero to be returned, for some reason
             self.scale = 1.01
 
-        #TODO consider adding this to another parent from HERE
-        self.fake_client = bc.BulletClient(connection_mode=p.DIRECT) 
-        if self.fake_client == -1:
-            raise RuntimeError('Pybullet could not connect to physics client')
-        # heightmap param dict 
-        self.heightmap_params = {'length': 1.25, # assumes square 
-                            'robot_position': 0.5, # distance of robot base origin from back edge of height map
-                            'grid_spacing': 0.125}
-        assert self.heightmap_params['length'] % self.heightmap_params['grid_spacing'] == 0
-        self.grid_len = int(self.heightmap_params['length']/self.heightmap_params['grid_spacing']) + 1
 
-
-        # TODO to here maybe
-         
         self.reset(hard_reset=True) # hard reset clears the simulation and creates heightfield from scratch. Its faster
 
         self.client.setPhysicsEngineParameter(enableFileCaching=0) # load the newly generated terrain every reset()
@@ -69,38 +56,21 @@ class AliengoHills(aliengo_env.AliengoEnv):
 
         # to not do a hard reset, but hard reset is necessary in the constructor 
 
-    # def render(self, mode='human', client=None):
-    #     if client is None: # for some reason I can't use self.client as a default value in the function definition line.
-    #         return self.quadruped.render(mode=mode, client=self.client)
-    #     else:
-    #         return self.quadruped.render(mode=mode, client=client)
-
     def reset(self, hard_reset=False):
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. Simulation is stepped to allow robot to fall
         to ground and settle completely.'''
 
         if hard_reset:
-            # TODO I think I can just put this code block into a super()._hard_reset() function 
-            self.client.resetSimulation()
-            self.fake_client.resetSimulation() 
-        
-            self.client.setTimeStep(1/240.)
-            self.client.setGravity(0,0,-9.8)
-            self.client.setRealTimeSimulation(self.realTime) # this has no effect in DIRECT mode, only GUI mode
-            
-            self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-            self.fake_plane = self.fake_client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-            # UNTIL here #TODO
+            self._hard_reset() # resets the simulation and reloads the plane
             self._create_hills(update=False)
             self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                             max_torque=self.max_torque, 
                                             kp=self.kp, 
                                             kd=self.kd)
-
         else: 
             self._create_hills(update=True)
-
+            
         return super().reset() # resets quadruped position (and a few other vars), updates state, returns observation
     
 
