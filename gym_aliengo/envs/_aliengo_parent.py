@@ -6,6 +6,10 @@ from os.path import dirname, join
 class AliengoEnvParent(aliengo_env.AliengoEnv):
 
     def __init__(self, **kwargs):
+        
+        # make 'hutter_pmtg' the default mode for all environments with terrain (which are children of this class)
+        if not 'env_mode' in kwargs:
+            kwargs['env_mode'] = 'hutter_pmtg'
 
         super().__init__(**kwargs)
 
