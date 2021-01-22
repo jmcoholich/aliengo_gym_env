@@ -26,7 +26,7 @@ class AliengoEnv(gym.Env):
                     kp=0.1, # acts on position erorr
                     kd=1.0, # acts on rate of position erorr
                     action_repeat=4,
-                    timeout=20.0, # number of seconds to timeout after
+                    timeout=60.0, # number of seconds to timeout after
                     realTime=False): # should never be True when training, only for visualzation or debugging MAYBE
         # Environment Options
         self.use_pmtg = use_pmtg
@@ -147,7 +147,7 @@ class AliengoEnv(gym.Env):
             rew, rew_dict = self.quadruped.pmtg_reward()
         else:
             raise NotImplementedError
-            rew, rew_dict = self.quadruped.reward()
+            # rew, rew_dict = self.quadruped.reward()
         self._update_mean_rew_dict(rew_dict)
 
         if done:
