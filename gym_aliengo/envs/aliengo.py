@@ -7,6 +7,8 @@ import pybullet as p
 import numpy as np
 import os
 import time
+import warnings
+import sys
 
 class Aliengo:
     def __init__(self, 
@@ -117,7 +119,7 @@ class Aliengo:
         4D IMU data, last position targets'''
 
         if not self.state_is_updated:
-            raise
+            raise ValueError('State has not been updated since last "get observation" call.')
         imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], self.base_avel[:-1]))
         # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
         imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
@@ -166,13 +168,13 @@ class Aliengo:
     def get_observation(self):
         
         raise NotImplementedError
-        self.state = np.concatenate((self.applied_torques, 
-                                            self._positions_to_actions(self.joint_positions),
-                                            self.joint_velocities,
-                                            self.base_orientation,
-                                            self.foot_normal_forces,
-                                            self.cartesian_base_accel,
-                                            self.base_twist[3:])) # last item is base angular velocity
+        # self.state = np.concatenate((self.applied_torques, 
+        #                                     self._positions_to_actions(self.joint_positions),
+        #                                     self.joint_velocities,
+        #                                     self.base_orientation,
+        #                                     self.foot_normal_forces,
+        #                                     self.cartesian_base_accel,
+        #                                     self.base_twist[3:])) # last item is base angular velocity
 
 
     def pmtg_reward(self):
@@ -220,7 +222,7 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.05 * lin_vel_rew + 0.04 * base_motion_rew + 0.02 * body_collision_rew + 0.025 * target_smoothness_rew \
+        return 0.15 * lin_vel_rew + 0.04 * base_motion_rew + 0.02 * body_collision_rew + 0.025 * target_smoothness_rew \
                         + 2e-5 * torque_rew, rew_dict
 
     
@@ -341,8 +343,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.01] * 4 + [-0.2, -0.2, -0.2] * 4) # TODO
-        ub = np.array([0.01] * 4 + [0.2, 0.2, 0.2] * 4) 
+        lb = np.array([-0.01] * 4 + [-0.25, -0.25, -0.25] * 4) # TODO
+        ub = np.array([0.01] * 4 + [0.25, 0.25, 0.25] * 4) 
         return lb, ub
 
 
