@@ -688,7 +688,7 @@ class Aliengo:
         if foot is None:
             foot = np.random.randint(0, 4)
         self.client.applyExternalForce(self.quadruped, self.foot_links[foot], force, (0,0,0), p.LINK_FRAME)
-        self.last_foot_disturbance = np.concatenate(force, np.array([foot]))
+        self.last_foot_disturbance = np.concatenate((force, np.array([foot])))
         return force, foot
     
 
@@ -990,6 +990,7 @@ class Aliengo:
         self.f_i = np.zeros(4)
         self.joint_pos_error_history = [np.zeros(12)] * 3 
         self.joint_velocity_history = [np.zeros(12)] * 3
+        self.last_true_joint_position_targets = positions
         return self.foot_target_history[0]
 
 
