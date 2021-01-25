@@ -276,7 +276,7 @@ class Aliengo:
          "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
 
         '''
-        speed_treshold = 1.8 # m/s
+        speed_treshold = 0.5 # m/s
         base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
         lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
                                                                                 if base_vel[0] < speed_treshold else 1.0
