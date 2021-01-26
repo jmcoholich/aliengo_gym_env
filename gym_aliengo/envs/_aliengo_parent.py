@@ -11,6 +11,10 @@ class AliengoEnvParent(aliengo_env.AliengoEnv):
         if not 'env_mode' in kwargs:
             kwargs['env_mode'] = 'hutter_pmtg'
 
+        # Make flat ground as False (enable terrain scan) for envs that have terrain
+        if not 'flat_ground' in kwargs:
+            kwargs['flat_ground'] = False
+
         super().__init__(**kwargs)
 
         self.fake_client = bc.BulletClient(connection_mode=p.DIRECT) 

@@ -27,6 +27,7 @@ class AliengoEnv(gym.Env):
                     kd=1.0, # acts on rate of position erorr
                     action_repeat=4,
                     timeout=60.0, # number of seconds to timeout after
+                    flat_ground=True, # this is for getting terrain scan in privileged info for Aliengo 
                     realTime=False): # should never be True when training, only for visualzation or debugging MAYBE
         # Environment Options
         self.env_mode = env_mode
@@ -36,6 +37,7 @@ class AliengoEnv(gym.Env):
         self.eps_timeout = 240.0/self.n_hold_frames * timeout # number of steps to timeout after
         # if U[0, 1) is less than this, perturb
         self.perturb_p = 1.0/(self.avg_time_per_perturb * 240.0) * self.n_hold_frames
+        self.flat_ground = flat_ground
         
         # setting these to class variables so that child classes can use it as such. 
         self.realTime = realTime 
@@ -72,12 +74,16 @@ class AliengoEnv(gym.Env):
             self.action_lb, self.action_ub = self.quadruped.get_pmtg_action_bounds()
             observation_lb, observation_ub = self.quadruped.get_hutter_pmtg_observation_bounds()
 
+        elif self.env_mode == 'hutter_teacher_pmtg':
+            self.action_lb, self.action_ub = self.quadruped.get_pmtg_action_bounds()
+            observation_lb, observation_ub = self.quadruped.get_hutter_teacher_pmtg_observation_bounds()
+
         elif self.env_mode == 'flat':
             self.action_lb, self.action_ub = self.quadruped.get_joint_position_bounds()
             observation_lb, observation_ub = self.quadruped.get_observation_bounds()
 
         else:
-            raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', or 'flat'. "
+            raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg', or 'flat'. "
                             "Value {} was given.".format(self.env_mode))
 
         self.eps_step_counter = 0 # Used for triggering timeout
@@ -100,14 +106,14 @@ class AliengoEnv(gym.Env):
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
 
-        if self.env_mode in ['pmtg', 'hutter_pmtg'] :
+        if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
             f = action[:4]
             residuals = action[4:].reshape((4,3))
             self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
             self.t += 1./240. * self.n_hold_frames
         elif self.env_mode == 'flat':
             self.quadruped.set_joint_position_targets(action)
-        else: raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', or 'flat'. "
+        else: raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg', or 'flat'. "
                                                                             "Value {} was given.".format(self.env_mode))
 
         if (np.random.rand() < self.perturb_p) and self.apply_perturb: 
@@ -127,6 +133,8 @@ class AliengoEnv(gym.Env):
             obs = self.quadruped.get_pmtg_observation()
         elif self.env_mode == 'hutter_pmtg':
             obs = self.quadruped.get_hutter_pmtg_observation()
+        elif self.env_mode == 'hutter_teacher_pmtg':
+            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground)
         elif self.env_mode == 'flat':
             obs = self.quadruped.get_observation()
         else: assert False
@@ -135,9 +143,9 @@ class AliengoEnv(gym.Env):
         done, termination_dict = self._is_state_terminal() # this must come after self._update_state()
         info.update(termination_dict) # termination_dict is an empty dict if not done
 
-        if self.env_mode in ['pmtg', 'hutter_pmtg']:
+        if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg']:
             rew, rew_dict = self.quadruped.pmtg_reward()
-        elif self.env_mode == 'pmtg':
+        elif self.env_mode == 'flat':
             raise NotImplementedError
             # rew, rew_dict = self.quadruped.reward()
         else: assert False
@@ -184,6 +192,9 @@ class AliengoEnv(gym.Env):
         elif self.env_mode == 'hutter_pmtg':
             self.t = 0.0
             obs = self.quadruped.get_hutter_pmtg_observation()
+        elif self.env_mode == 'hutter_teacher_pmtg':
+            self.t = 0.0
+            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground)
         elif self.env_mode == 'flat':
             obs = self.quadruped.get_observation()
         else: assert False

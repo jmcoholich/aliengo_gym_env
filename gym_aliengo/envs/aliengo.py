@@ -84,6 +84,15 @@ class Aliengo:
         self.last_torso_disturbance = np.zeros(4) # this is a foot index and a force
 
 
+    def get_hutter_teacher_pmtg_observation_bounds(self):
+        return np.concatenate((self.get_hutter_pmtg_observation_bounds(), self.get_privileged_info_bounds()))
+
+
+    def get_hutter_teacher_pmtg_observation(self, flat_ground):
+        # breakpoint()
+        return np.concatenate((self.get_hutter_pmtg_observation(), self.get_privileged_info()))
+
+
     def is_state_terminal(self, flipping_bounds=[np.pi/2., np.pi/4., np.pi/4.], height_lb=0.23, height_ub=0.8): 
         ''' Calculates whether to end current episode due to failure based on current state.
         Returns boolean and puts reason in info if True. Default flipping bounds work well for Aliengo-v0 because its 
@@ -135,7 +144,7 @@ class Aliengo:
 
         if not self.state_is_updated:
             raise ValueError('State has not been updated since last "get observation" call.')
-        obs = np.concatenate((self.client.getEuelerFromQuaternion(self.base_orientation),
+        obs = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation),
                             self.base_vel, #TODO write a state estimator for this stuff, for actual robot
                             self.base_avel,
                             self.joint_positions,
@@ -341,11 +350,24 @@ class Aliengo:
         self.last_torso_disturbance = np.zeros(6) # NOTE these variables only work when disturbances last for 1 step 
         self.last_foot_disturbance = np.zeros(4) # If I have multi-step disturbances, I will need to change this
         return privileged_info
-        
+
+    
+    def get_privileged_info_bounds(self):
+        # NOTE: I have determined that observation bounds are not really used for anything in kostrikov's implementation
+
+        # info_lb = np.concatenate((-np.ones(self.num_foot_terrain_scan_points * 4) * 1e2,
+        #                         np.zeros(4), # foot contact forces 
+        #                             ))
+
+        # info_ub = np.concatenate((np.ones(self.num_foot_terrain_scan_points * 4) * 1e2,
+        #                         np.ones(4) * 1e5, # foot contact forces 
+        #                         ))
+        priv_info_len = self.num_foot_terrain_scan_points * 4 + 4 + 4 + self.num_links + 6 + 4
+        return -np.ones(priv_info_len) *1e10, np.ones(priv_info_len) * 1e10 
+
 
     def _get_foot_terrain_scan(self, fake_client=None, flat_ground=False, ray_start=100):
         '''Returns a flat array of relative heights of length 4 * self.num_foot_terrain_scan_points.
-        TODO implement flat_ground in a way that doesn't require fake client
         NOTE concavity of terrain can't be determined with this scan setup.
         TODO see if starting the rays extremely is actually slower (ie do I care about making rays shorter when I can)'''
 
@@ -1155,9 +1177,12 @@ if __name__ == '__main__':
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
-    quadruped._get_foot_terrain_scan(flat_ground=True)
+    # quadruped._get_foot_terrain_scan(flat_ground=True)
     
     # while True:
     #     quadruped.get_privledged_terrain_info(client)
     #     client.stepSimulation()
     #     time.sleep(1/240.)
+    quadruped.reset_joint_positions()
+    quadruped.update_state()
+    quadruped.get_hutter_teacher_pmtg_observation(flat_ground=True)
