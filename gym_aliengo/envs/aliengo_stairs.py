@@ -80,8 +80,8 @@ class AliengoStairs(_aliengo_parent.AliengoEnvParent):
         quadruped_done, termination_dict = self.quadruped.is_state_terminal(flipping_bounds=[np.pi/2.0]*3, 
                                                                             height_ub=np.inf) # stairs can go very high 
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
-                    (self.base_position[0] >= self.stairs_length - 2.0)
-        y_out_of_bounds = not (-self.stairs_width/2. < self.base_position[1] < self.stairs_width/2.)
+                    (self.quadruped.base_position[0] >= self.stairs_length - 2.0)
+        y_out_of_bounds = not (-self.stairs_width/2. < self.quadruped.base_position[1] < self.stairs_width/2.)
         if timeout:
             termination_dict['TimeLimit.truncated'] = True
         elif y_out_of_bounds:

@@ -88,14 +88,14 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
                 total_len += length_values[i]
 
 
-    def _is_state_terminal(self) -> bool:
+    def _is_state_terminal(self):
         ''' Calculates whether to end current episode due to failure based on current state. '''
 
         quadruped_done, termination_dict = self.quadruped.is_state_terminal(flipping_bounds=[np.pi/2.0]*3, 
-                                height_ub=base_z_position > 0.8 + self.terrain_height + self.terrain_height_range/2.) 
+                                height_ub=0.8 + self.terrain_height + self.terrain_height_range/2.) 
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
-                    (self.base_position[0] >= self.terrain_length - 1.0)
-        y_out_of_bounds = not (-self.terrain_width/2. < self.base_position[1] < self.terrain_width/2.)
+                    (self.quadruped.base_position[0] >= self.terrain_length - 1.0)
+        y_out_of_bounds = not (-self.terrain_width/2. < self.quadruped.base_position[1] < self.terrain_width/2.)
 
         if timeout:
             termination_dict['TimeLimit.truncated'] = True

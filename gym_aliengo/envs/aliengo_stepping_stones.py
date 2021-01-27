@@ -74,7 +74,7 @@ class AliengoSteppingStones(_aliengo_parent.AliengoEnvParent):
                                                             height_lb=self.height - self.stone_height_range/2.0,
                                                             height_ub=self.height - self.stone_height_range/2.0 + 1.0) 
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
-                    (self.base_position[0] >= self.course_length + 2.0)
+                    (self.quadruped.base_position[0] >= self.course_length + 2.0)
         # the height termination condition should take care of y_out_of_bounds
         # y_out_of_bounds = not (-self.stairs_width/2. < self.base_position[1] < self.stairs_width/2.)
         if timeout:

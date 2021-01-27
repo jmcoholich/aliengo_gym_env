@@ -143,8 +143,8 @@ class AliengoHills(_aliengo_parent.AliengoEnvParent):
         quadruped_done, termination_dict = self.quadruped.is_state_terminal(flipping_bounds=[np.pi/2.0]*3,
                                                                             height_ub=self.hills_height + 0.8)
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
-                    (self.base_position[0] >= self.hills_length - 0.5) # don't want it to fall off the end.
-        y_out_of_bounds = not (-self.hills_width/2. < self.base_position[1] < self.hills_width/2.)
+                    (self.quadruped.base_position[0] >= self.hills_length - 0.5) # don't want it to fall off the end.
+        y_out_of_bounds = not (-self.hills_width/2. < self.quadruped.base_position[1] < self.hills_width/2.)
         if timeout:
             termination_dict['TimeLimit.truncated'] = True
         elif y_out_of_bounds:
