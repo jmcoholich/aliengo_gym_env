@@ -38,7 +38,7 @@ class AliengoEnv(gym.Env):
         # if U[0, 1) is less than this, perturb
         self.perturb_p = 1.0/(self.avg_time_per_perturb * 240.0) * self.n_hold_frames
         self.flat_ground = flat_ground
-        
+
         # setting these to class variables so that child classes can use it as such. 
         self.realTime = realTime 
         self.max_torque = max_torque
@@ -58,6 +58,7 @@ class AliengoEnv(gym.Env):
                                             max_torque=max_torque, 
                                             kp=kp, 
                                             kd=kd)
+        self.fake_client = None
         self.client.setGravity(0,0,-9.8)
         if self.realTime:
             warnings.warn('\n\n' + '#'*100 + '\nExternal force/torque disturbances will NOT work properly with '
@@ -100,6 +101,7 @@ class AliengoEnv(gym.Env):
             )
 
 
+
     def step(self, action):
         DELTA = 0.01
         if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
@@ -134,7 +136,8 @@ class AliengoEnv(gym.Env):
         elif self.env_mode == 'hutter_pmtg':
             obs = self.quadruped.get_hutter_pmtg_observation()
         elif self.env_mode == 'hutter_teacher_pmtg':
-            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground)
+            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground, 
+                                                                    fake_client=self.fake_client)
         elif self.env_mode == 'flat':
             obs = self.quadruped.get_observation()
         else: assert False
@@ -194,7 +197,8 @@ class AliengoEnv(gym.Env):
             obs = self.quadruped.get_hutter_pmtg_observation()
         elif self.env_mode == 'hutter_teacher_pmtg':
             self.t = 0.0
-            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground)
+            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground, 
+                                                                    fake_client=self.fake_client)
         elif self.env_mode == 'flat':
             obs = self.quadruped.get_observation()
         else: assert False

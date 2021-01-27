@@ -85,12 +85,16 @@ class Aliengo:
 
 
     def get_hutter_teacher_pmtg_observation_bounds(self):
-        return np.concatenate((self.get_hutter_pmtg_observation_bounds(), self.get_privileged_info_bounds()))
-
-
-    def get_hutter_teacher_pmtg_observation(self, flat_ground):
         # breakpoint()
-        return np.concatenate((self.get_hutter_pmtg_observation(), self.get_privileged_info()))
+        obs_lb, obs_ub = self.get_hutter_pmtg_observation_bounds()
+        info_lb, info_ub = self.get_privileged_info_bounds()
+        return np.concatenate((obs_lb, info_lb)), np.concatenate((obs_ub, info_ub))
+
+
+    def get_hutter_teacher_pmtg_observation(self, flat_ground, fake_client=None):
+        # breakpoint()
+        return np.concatenate((self.get_hutter_pmtg_observation(), self.get_privileged_info(flat_ground=flat_ground,
+            fake_client=fake_client)))
 
 
     def is_state_terminal(self, flipping_bounds=[np.pi/2., np.pi/4., np.pi/4.], height_lb=0.23, height_ub=0.8): 
@@ -409,7 +413,7 @@ class Aliengo:
         return self.foot_friction_coeffs
 
     
-    def randomize_link_masses(self, lb=0.05, ub=0.05):
+    def randomize_link_masses(self, lb=-0.05, ub=0.05):
         '''Set link masses to random values, which are uniformly random percent increases/decreases to original link 
         mass. Returns random masses. Excludes links that have zero mass. Should probably only be called when resetting
         environments. Returns the new masses.'''
