@@ -91,12 +91,6 @@ class Aliengo:
         return np.concatenate((obs_lb, info_lb)), np.concatenate((obs_ub, info_ub))
 
 
-    def get_hutter_teacher_pmtg_observation(self, flat_ground, fake_client=None):
-        # breakpoint()
-        return np.concatenate((self.get_hutter_pmtg_observation(), self.get_privileged_info(flat_ground=flat_ground,
-            fake_client=fake_client)))
-
-
     def is_state_terminal(self, flipping_bounds=[np.pi/2., np.pi/4., np.pi/4.], height_lb=0.23, height_ub=0.8): 
         ''' Calculates whether to end current episode due to failure based on current state.
         Returns boolean and puts reason in info if True. Default flipping bounds work well for Aliengo-v0 because its 
@@ -116,7 +110,12 @@ class Aliengo:
         return any([falling, height_out_of_bounds]), termination_dict
 
 
-    def update_state(self):
+    def get_hutter_teacher_pmtg_observation(self):
+        # breakpoint()
+        return np.concatenate((self.get_hutter_pmtg_observation(), self.privileged_info))
+
+
+    def update_state(self, flat_ground, fake_client=None):
         '''Updates state of the quadruped. This should be called once per env.step() and once per env.reset(). 
         The state is not the same as the observation. Returns nothing.'''
 
@@ -137,7 +136,80 @@ class Aliengo:
         self.joint_velocity_history.pop()
         self.joint_velocity_history.insert(0, self.joint_velocities)
 
+        self.privileged_info = self.get_privileged_info(flat_ground=flat_ground, fake_client=fake_client)
+
         self.state_is_updated = True
+
+    
+    def _foot_clearance_rew(self):
+        '''Calculates foot clearancance reward as fraction of feet in swing phase that are higher than the highest
+        surrounding point of the foot scan.'''
+
+        num_feet_in_swing = 0.0
+        num_clearance = 0.0
+        for i in range(4):
+            if np.pi < self.phases[i] < 2 * np.pi:
+                num_feet_in_swing += 1.0
+                
+                scan_points = self.privileged_info[i * self.num_foot_terrain_scan_points: \
+                                                                            (i+1) * self.num_foot_terrain_scan_points] 
+                #TODO make sure these match up with the correct foot's phase
+                extra_clearance = 0.025 # about one inch
+                if (scan_points < 0.0 - extra_clearance).all():
+                    num_clearance += 1.0
+        
+        return num_clearance/num_feet_in_swing
+
+
+    def pmtg_reward(self):
+        ''' 
+        Returns the reward function specified in S4 here: 
+        https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf 
+        - however, just reward fwd movement, no angular velocity reward bc command direction (+x) never changes
+        - interestingly, all the reward functions are wrapped in an exponential function, so the agent gets
+        exponentially increasing rewards as it gets better (up to a threshold)
+
+        TODO structure code here and in environments such that I avoid repeated pybullet function calls. Perhaps this
+        function can eventually return pmtg reward AND observation. (or write another function that calls this one 
+        to do that)
+        
+        Clipping lienar velocity to 1.8 based on: 
+         "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
+
+        '''
+        speed_treshold = 0.5 # m/s
+        base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
+        lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
+                                                                                if base_vel[0] < speed_treshold else 1.0
+
+        # give reward if we are pointed the right direction
+        _, _, yaw = self.client.getEulerFromQuaternion(self.base_orientation)
+        angular_rew = np.exp(-1.5 * abs(yaw)) # if yaw is zero this is one. 
+
+        base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
+                                            np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
+
+        foot_clearance_rew = self._foot_clearance_rew()
+
+        body_collision_rew = -self._is_non_foot_ground_contact() # max is 0
+
+        target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
+                                                                                            self.foot_target_history[2])
+
+        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
+        applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        torque_rew = -np.linalg.norm(applied_torques, 1)
+
+        # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
+        # add terms of reward function
+        rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
+                        'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
+                        'torque_rew':torque_rew, 'angular_rew': angular_rew}
+        # other stuff to track
+        rew_dict['x_vel'] = self.base_vel[0]
+
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 0.01 * foot_clearance_rew \
+                + 0.02 * body_collision_rew + 0.25 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
 
 
     def get_hutter_pmtg_observation(self, noisy=False):
@@ -272,55 +344,6 @@ class Aliengo:
         #                                     self.base_twist[3:])) # last item is base angular velocity
         self.state_is_updated = False
 
-
-    def pmtg_reward(self):
-        ''' 
-        Returns the reward function specified in S4 here: 
-        https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf 
-        - however, just reward fwd movement, no angular velocity reward bc command direction (+x) never changes
-        - interestingly, all the reward functions are wrapped in an exponential function, so the agent gets
-        exponentially increasing rewards as it gets better (up to a threshold)
-
-        TODO structure code here and in environments such that I avoid repeated pybullet function calls. Perhaps this
-        function can eventually return pmtg reward AND observation. (or write another function that calls this one 
-        to do that)
-        
-        Clipping lienar velocity to 1.8 based on: 
-         "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
-
-        '''
-        speed_treshold = 0.5 # m/s
-        base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
-        lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
-                                                                                if base_vel[0] < speed_treshold else 1.0
-
-        # angular_vel_rew = 0.0
-
-        base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
-                                            np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
-
-        # foot_clearance_rew = 0 #TODO this reward seems strange and the definition is overly mathematical lol
-
-        body_collision_rew = -self._is_non_foot_ground_contact() # max is 0
-
-        target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
-                                                                                            self.foot_target_history[2])
-
-        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
-        applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
-        torque_rew = -np.linalg.norm(applied_torques, 1)
-
-        # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
-        # add terms of reward function
-        rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
-                        'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
-                        'torque_rew':torque_rew}
-        # other stuff to track
-        rew_dict['x_vel'] = self.base_vel[0]
-
-        return 0.50 * lin_vel_rew + 0.04 * base_motion_rew + 0.02 * body_collision_rew + 0.25 * target_smoothness_rew \
-                        + 2e-5 * torque_rew, rew_dict
-
     
     def _init_vis(self):
         small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 0, 255, 0.9])
@@ -371,7 +394,8 @@ class Aliengo:
 
 
     def _get_foot_terrain_scan(self, fake_client=None, flat_ground=False, ray_start=100):
-        '''Returns a flat array of relative heights of length 4 * self.num_foot_terrain_scan_points.
+        '''Returns a flat array of relative heights of length 4 * self.num_foot_terrain_scan_points. The heights are 
+        relative to the bottom of the aliengo foot.
         NOTE concavity of terrain can't be determined with this scan setup.
         TODO see if starting the rays extremely is actually slower (ie do I care about making rays shorter when I can)'''
 
@@ -390,7 +414,8 @@ class Aliengo:
             ray_start_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * ray_start), axis=1)
             ray_end_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * -1), axis=1)
             raw = fake_client.rayTestBatch(rayFromPositions=ray_start_pos, rayToPositions=ray_end_pos)
-            relative_z = np.array([raw[i][3][2] - foot_pos[j][2] for j in range(4) for i in range(j * n, (j+1) * n)])
+            relative_z = np.array([raw[i][3][2] - (foot_pos[j][2] - 0.0265) for j in range(4)\
+                                                                                     for i in range(j * n, (j+1) * n)])
             
             if self.vis: 
                 for i in range(n * 4):
@@ -1174,7 +1199,7 @@ if __name__ == '__main__':
     client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0, vis=True)
+    quadruped = Aliengo(client, fixed=False, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0, vis=True)
 
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
@@ -1189,4 +1214,9 @@ if __name__ == '__main__':
     #     time.sleep(1/240.)
     quadruped.reset_joint_positions()
     quadruped.update_state()
-    quadruped.get_hutter_teacher_pmtg_observation(flat_ground=True)
+    while True:
+        time.sleep(1/240.)
+        quadruped.update_state()
+        print(np.array(list(client.getEulerFromQuaternion(quadruped.base_orientation)))*180.0/np.pi)
+        client.stepSimulation()
+    # quadruped.get_hutter_teacher_pmtg_observation(flat_ground=True)

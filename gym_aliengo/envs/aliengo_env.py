@@ -129,15 +129,14 @@ class AliengoEnv(gym.Env):
 
         for _ in range(self.n_hold_frames): self.client.stepSimulation()
         self.eps_step_counter += 1
-        self.quadruped.update_state()
+        self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)
 
         if self.env_mode == 'pmtg':
             obs = self.quadruped.get_pmtg_observation()
         elif self.env_mode == 'hutter_pmtg':
             obs = self.quadruped.get_hutter_pmtg_observation()
         elif self.env_mode == 'hutter_teacher_pmtg':
-            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground, 
-                                                                    fake_client=self.fake_client)
+            obs = self.quadruped.get_hutter_teacher_pmtg_observation()
         elif self.env_mode == 'flat':
             obs = self.quadruped.get_observation()
         else: assert False
