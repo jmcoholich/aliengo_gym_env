@@ -154,7 +154,7 @@ class Aliengo:
                 scan_points = self.privileged_info[i * self.num_foot_terrain_scan_points: \
                                                                             (i+1) * self.num_foot_terrain_scan_points] 
                 #TODO make sure these match up with the correct foot's phase
-                extra_clearance = 0.05 # about two inches
+                extra_clearance = 0.06 # more than two inches
                 if (scan_points < 0.0 - extra_clearance).all():
                     num_clearance += 1.0
         
@@ -261,7 +261,7 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 0.10 * foot_clearance_rew \
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 1.00 * foot_clearance_rew \
                 + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
 
 
@@ -405,6 +405,11 @@ class Aliengo:
         for i in range(self.num_foot_terrain_scan_points * 4):
             self.foot_scan_balls[i] = self.client.createMultiBody(baseVisualShapeIndex=small_ball)
             self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME,1)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_TINY_RENDERER, 0) # perhaps my GPU rendering just isn't workin
+        # for some reason, since this option doesn't change performance at all.
         
 
     def get_privileged_info(self, fake_client=None, flat_ground=False, ray_start=100):
@@ -481,7 +486,8 @@ class Aliengo:
             for i in range(n * 4):
                 pos = np.concatenate((scan_positions[i], [raw[i][3][2]]))
                 self.client.resetBasePositionAndOrientation(self.foot_scan_balls[i], posObj=pos, ornObj=[0,0,0,1])
-                self.client.addUserDebugText('{:.3f}'.format(relative_z[i]), 
+                # for some reason, rendering this text increases rendering time by about 100x. Why???
+                self.client.addUserDebugText('{:.1f}'.format(relative_z[i]), 
                                                 textPosition=pos, 
                                                 replaceItemUniqueId=self.foot_text[i],
                                                 textColorRGB=[0]*3)
@@ -522,7 +528,7 @@ class Aliengo:
         step_bottom = -0.5 # from paper
         lateral_offset = 0.075 # how much to push the feet out 
         x_offset = 0.02109375 # experimental, close to balance 
-        f0 = 1.25 # 1.25 is from paper
+        f0 = 1.5 # 1.25 is from paper
 
         assert t >= 0
         assert f.size == 4
@@ -550,8 +556,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.01] * 4 + [-0.25, -0.1, -0.1] * 4) # TODO
-        ub = np.array([0.01] * 4 + [0.25, 0.1, 0.1] * 4) 
+        lb = np.array([-0.001] * 4 + [-0.2] * 12) # TODO
+        ub = np.array([0.001] * 4 + [0.2] * 12) 
         return lb, ub
 
 
@@ -1268,9 +1274,12 @@ if __name__ == '__main__':
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
     quadruped.reset_joint_positions()
     while True:
+        begin = time.time()
         time.sleep(1./240)
         quadruped._get_foot_terrain_scan(flat_ground=True)
         client.stepSimulation()
+        print(time.time() - begin)
+        
 
     # while True:
     #     quadruped.get_privledged_terrain_info(client)

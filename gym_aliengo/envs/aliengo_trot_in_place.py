@@ -17,13 +17,13 @@ class AliengoTrotInPlace(aliengo_env.AliengoEnv):
     def __init__(self, **kwargs):
         kwargs['env_mode'] = 'hutter_teacher_pmtg' 
         super().__init__(**kwargs)
-        self.action_lb = np.array([-1.0] * 4 + [-0.2, -0.2, -0.2] * 4)
-        self.action_ub = np.array([3.0] * 4 + [0.2, 0.2, 0.2] * 4) 
-        self.action_space = spaces.Box(
-            low=self.action_lb,
-            high=self.action_ub,
-            dtype=np.float32
-            )
+        # self.action_lb = np.array([-1.0] * 4 + [-0.2, -0.2, -0.2] * 4)
+        # self.action_ub = np.array([3.0] * 4 + [0.2, 0.2, 0.2] * 4) 
+        # self.action_space = spaces.Box(
+        #     low=self.action_lb,
+        #     high=self.action_ub,
+        #     dtype=np.float32
+        #     )
     
     # this is copied and pasted 
     def step(self, action):
