@@ -178,12 +178,62 @@ class Aliengo:
         
         Clipping lienar velocity to 1.8 based on: 
          "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
-
         '''
+        
         speed_treshold = 0.5 # m/s
         base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
         lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
                                                                                 if base_vel[0] < speed_treshold else 1.0
+
+        # give reward if we are pointed the right direction
+        _, _, yaw = self.client.getEulerFromQuaternion(self.base_orientation)
+        angular_rew = np.exp(-1.5 * abs(yaw)) # if yaw is zero this is one. 
+
+        base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
+                                            np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
+
+        foot_clearance_rew = self._foot_clearance_rew()
+
+        body_collision_rew = -self._is_non_foot_ground_contact() # max is 0
+
+        target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
+                                                                                            self.foot_target_history[2])
+
+        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
+        applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        torque_rew = -np.linalg.norm(applied_torques, 1)
+
+        # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
+        # add terms of reward function
+        rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
+                        'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
+                        'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew}
+        # other stuff to track
+        rew_dict['x_vel'] = self.base_vel[0]
+
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 0.10 * foot_clearance_rew \
+                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
+
+
+    def trot_in_place_reward(self):
+        ''' 
+        Returns the reward function specified in S4 here: 
+        https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf 
+        - however, just reward fwd movement, no angular velocity reward bc command direction (+x) never changes
+        - interestingly, all the reward functions are wrapped in an exponential function, so the agent gets
+        exponentially increasing rewards as it gets better (up to a threshold)
+
+        TODO structure code here and in environments such that I avoid repeated pybullet function calls. Perhaps this
+        function can eventually return pmtg reward AND observation. (or write another function that calls this one 
+        to do that)
+        
+        Clipping linear velocity to 1.8 based on: 
+         "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
+        '''
+        
+        speed_treshold = 0.0 # m/s
+        base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
+        lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) 
 
         # give reward if we are pointed the right direction
         _, _, yaw = self.client.getEulerFromQuaternion(self.base_orientation)

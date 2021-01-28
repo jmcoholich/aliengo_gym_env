@@ -10,7 +10,6 @@ register(
     entry_point='gym_aliengo.envs:AliengoSteppingStones',
 )
 
-
 register(
     id='AliengoHills-v0',
     entry_point='gym_aliengo.envs:AliengoHills',
@@ -24,6 +23,11 @@ register(
 register(
     id='AliengoStairs-v0',
     entry_point='gym_aliengo.envs:AliengoStairs',
+)
+
+register(
+    id='AliengoTrotInPlace-v0',
+    entry_point='gym_aliengo.envs:AliengoTrotInPlace-v0',
 )
 
 
