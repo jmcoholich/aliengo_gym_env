@@ -154,7 +154,7 @@ class Aliengo:
                 scan_points = self.privileged_info[i * self.num_foot_terrain_scan_points: \
                                                                             (i+1) * self.num_foot_terrain_scan_points] 
                 #TODO make sure these match up with the correct foot's phase
-                extra_clearance = 0.025 # about one inch
+                extra_clearance = 0.05 # about two inches
                 if (scan_points < 0.0 - extra_clearance).all():
                     num_clearance += 1.0
         
@@ -207,7 +207,7 @@ class Aliengo:
         # add terms of reward function
         rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
                         'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
-                        'torque_rew':torque_rew, 'angular_rew': angular_rew}
+                        'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew}
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
@@ -406,7 +406,9 @@ class Aliengo:
 
         if flat_ground:
             # the return is a flat vector 
-            return -np.repeat(foot_pos[:,2], self.num_foot_terrain_scan_points)
+            relative_z = -np.repeat(foot_pos[:,2], self.num_foot_terrain_scan_points)
+            if self.vis:
+                pass
         else:
             if fake_client is None: raise ValueError('Need another client with same terrain to get heightmap from.')
             r = 0.1
@@ -420,14 +422,14 @@ class Aliengo:
             relative_z = np.array([raw[i][3][2] - (foot_pos[j][2] - 0.0265) for j in range(4)\
                                                                                      for i in range(j * n, (j+1) * n)])
             
-            if self.vis: 
-                for i in range(n * 4):
-                    pos = np.concatenate((scan_positions[i], [raw[i][3][2]]))
-                    self.client.resetBasePositionAndOrientation(self.foot_scan_balls[i], posObj=pos, ornObj=[0,0,0,1])
-                    self.client.addUserDebugText('{:.3f}'.format(relative_z[i]), 
-                                                    textPosition=pos, 
-                                                    replaceItemUniqueId=self.foot_text[i],
-                                                    textColorRGB=[0]*3)
+        if self.vis: 
+            for i in range(n * 4):
+                pos = np.concatenate((scan_positions[i], [raw[i][3][2]]))
+                self.client.resetBasePositionAndOrientation(self.foot_scan_balls[i], posObj=pos, ornObj=[0,0,0,1])
+                self.client.addUserDebugText('{:.3f}'.format(relative_z[i]), 
+                                                textPosition=pos, 
+                                                replaceItemUniqueId=self.foot_text[i],
+                                                textColorRGB=[0]*3)
         return relative_z
             
 
@@ -1209,17 +1211,20 @@ if __name__ == '__main__':
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
-    # quadruped._get_foot_terrain_scan(flat_ground=True)
-    
+    while True:
+        time.sleep(1./240)
+        quadruped._get_foot_terrain_scan(flat_ground=True)
+        client.stepSimulation()
+
     # while True:
     #     quadruped.get_privledged_terrain_info(client)
     #     client.stepSimulation()
     #     time.sleep(1/240.)
-    quadruped.reset_joint_positions()
-    quadruped.update_state()
-    while True:
-        time.sleep(1/240.)
-        quadruped.update_state()
-        print(np.array(list(client.getEulerFromQuaternion(quadruped.base_orientation)))*180.0/np.pi)
-        client.stepSimulation()
+    # quadruped.reset_joint_positions()
+    # quadruped.update_state()
+    # while True:
+    #     time.sleep(1/240.)
+    #     quadruped.update_state()
+    #     print(np.array(list(client.getEulerFromQuaternion(quadruped.base_orientation)))*180.0/np.pi)
+    #     client.stepSimulation()
     # quadruped.get_hutter_teacher_pmtg_observation(flat_ground=True)
