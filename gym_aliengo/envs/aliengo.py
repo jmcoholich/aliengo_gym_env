@@ -556,8 +556,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.0001] * 4 + [-0.15] * 12) # TODO
-        ub = np.array([0.0001] * 4 + [0.15] * 12) 
+        lb = np.array([-0.0001] * 4 + [-0.1] * 12) # TODO
+        ub = np.array([0.0001] * 4 + [0.1] * 12) 
         return lb, ub
 
 
