@@ -211,8 +211,8 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 0.01 * foot_clearance_rew \
-                + 0.02 * body_collision_rew + 0.25 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 0.10 * foot_clearance_rew \
+                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
 
 
     def get_hutter_pmtg_observation(self, noisy=False):
