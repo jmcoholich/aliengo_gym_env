@@ -27,7 +27,7 @@ register(
 
 register(
     id='AliengoTrotInPlace-v0',
-    entry_point='gym_aliengo.envs:AliengoTrotInPlace-v0',
+    entry_point='gym_aliengo.envs:AliengoTrotInPlace',
 )
 
 

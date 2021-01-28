@@ -399,7 +399,7 @@ class Aliengo:
 
     
     def _init_vis(self):
-        small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 0, 255, 0.9])
+        small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 155, 255, 0.75])
         self.foot_scan_balls = [0] * self.num_foot_terrain_scan_points * 4
         self.foot_text = [0] * self.num_foot_terrain_scan_points * 4
         for i in range(self.num_foot_terrain_scan_points * 4):
@@ -456,9 +456,14 @@ class Aliengo:
 
         if flat_ground:
             # the return is a flat vector 
-            relative_z = -np.repeat(foot_pos[:,2], self.num_foot_terrain_scan_points)
+            relative_z = -np.repeat(foot_pos[:,2] -0.0265, self.num_foot_terrain_scan_points)
             if self.vis:
-                pass
+                r = 0.1
+                n = self.num_foot_terrain_scan_points
+                x = np.linspace(0, 2*np.pi, n)
+                scan_positions = (np.expand_dims(foot_pos[:, :-1], 1) + \
+                                    np.expand_dims(np.stack((r * np.cos(x), r * np.sin(x))).swapaxes(0,1), 0)).reshape((4*n, 2))
+                raw = np.zeros((len(scan_positions), 4, 3))
         else:
             if fake_client is None: raise ValueError('Need another client with same terrain to get heightmap from.')
             r = 0.1
@@ -1261,6 +1266,7 @@ if __name__ == '__main__':
     # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
+    quadruped.reset_joint_positions()
     while True:
         time.sleep(1./240)
         quadruped._get_foot_terrain_scan(flat_ground=True)

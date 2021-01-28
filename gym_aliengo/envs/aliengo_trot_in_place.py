@@ -1,5 +1,6 @@
 
 from gym_aliengo.envs import aliengo_env
+from gym import error, spaces, utils
 from pybullet_utils import bullet_client as bc
 import pybullet as p
 from os.path import dirname, join
@@ -18,9 +19,12 @@ class AliengoTrotInPlace(aliengo_env.AliengoEnv):
         super().__init__(**kwargs)
         self.action_lb = np.array([-1.0] * 4 + [-0.2, -0.2, -0.2] * 4)
         self.action_ub = np.array([3.0] * 4 + [0.2, 0.2, 0.2] * 4) 
-
+        self.action_space = spaces.Box(
+            low=self.action_lb,
+            high=self.action_ub,
+            dtype=np.float32
+            )
     
-
     # this is copied and pasted 
     def step(self, action):
         assert self.env_mode == 'hutter_teacher_pmtg'
