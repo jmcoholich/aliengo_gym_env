@@ -10,7 +10,7 @@ import numpy as np
 This class is the same as Aliengo-v0, but with the following changes:
 - reward function excludes term for forward motion. All other terms included
 - the mode is force to be teacher_PMTG
-- the action bounds are different
+# - the action bounds are different
 - the frequency set for the first leg, is set for all the legs.
 '''
 class AliengoTrotInPlace(aliengo_env.AliengoEnv):

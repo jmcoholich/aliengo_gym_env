@@ -14,7 +14,7 @@ class Aliengo:
     def __init__(self, 
                     pybullet_client, 
                     max_torque=40.0, 
-                    kp=0.1, 
+                    kp=1.0, #TODO 
                     kd=1.0, 
                     fixed=False, 
                     fixed_position=[0,0,1.0], 
@@ -154,7 +154,7 @@ class Aliengo:
                 scan_points = self.privileged_info[i * self.num_foot_terrain_scan_points: \
                                                                             (i+1) * self.num_foot_terrain_scan_points] 
                 #TODO make sure these match up with the correct foot's phase
-                extra_clearance = 0.06 # more than two inches
+                extra_clearance = 0.02 # less than an inch
                 if (scan_points < 0.0 - extra_clearance).all():
                     num_clearance += 1.0
         
@@ -261,7 +261,7 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 1.00 * foot_clearance_rew \
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 0.90 * foot_clearance_rew \
                 + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
 
 
