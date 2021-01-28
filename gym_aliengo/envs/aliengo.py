@@ -525,10 +525,10 @@ class Aliengo:
 
         # other trajectory parameters
         step_height = 0.2 # from paper
-        step_bottom = -0.5 # from paper
+        step_bottom = -0.45 # from paper
         lateral_offset = 0.075 # how much to push the feet out 
         x_offset = 0.02109375 # experimental, close to balance 
-        f0 = 1.5 # 1.25 is from paper
+        f0 = 2.25 # 1.25 is from paper
 
         assert t >= 0
         assert f.size == 4
@@ -556,8 +556,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.001] * 4 + [-0.2] * 12) # TODO
-        ub = np.array([0.001] * 4 + [0.2] * 12) 
+        lb = np.array([-0.0001] * 4 + [-0.15] * 12) # TODO
+        ub = np.array([0.0001] * 4 + [0.15] * 12) 
         return lb, ub
 
 
@@ -1195,7 +1195,7 @@ def trajectory_generator_test(client, quadruped):
     # quadruped.reset_joint_positions(stochastic=False)
     # time.sleep(2)
     while True:
-        phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-2.0] * 4), debug=True)
+        phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-0.0] * 4), debug=True)
         client.stepSimulation()
         time.sleep(1/240. * 1)
         if counter% 2 == 0:
@@ -1265,20 +1265,20 @@ if __name__ == '__main__':
     client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
-    quadruped = Aliengo(client, fixed=False, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0, vis=True)
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0, vis=True)
 
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
-    # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
+    trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
-    quadruped.reset_joint_positions()
-    while True:
-        begin = time.time()
-        time.sleep(1./240)
-        quadruped._get_foot_terrain_scan(flat_ground=True)
-        client.stepSimulation()
-        print(time.time() - begin)
+    # quadruped.reset_joint_positions()
+    # while True:
+    #     begin = time.time()
+    #     time.sleep(1./240)
+    #     quadruped._get_foot_terrain_scan(flat_ground=True)
+    #     client.stepSimulation()
+    #     print(time.time() - begin)
         
 
     # while True:
