@@ -158,7 +158,10 @@ class Aliengo:
                 if (scan_points < 0.0 - extra_clearance).all():
                     num_clearance += 1.0
         
-        return num_clearance/num_feet_in_swing
+        rew = 0.0
+        if num_feet_in_swing > 0:
+            rew = num_clearance/num_feet_in_swing
+        return rew
 
 
     def pmtg_reward(self):

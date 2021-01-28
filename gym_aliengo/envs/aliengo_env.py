@@ -187,7 +187,7 @@ class AliengoEnv(gym.Env):
         self.quadruped.reset_joint_positions(stochastic=True) 
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
-        self.quadruped.update_state()
+        self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)
         if self.env_mode == 'pmtg':
             self.t = 0.0
             obs = self.quadruped.get_pmtg_observation()
@@ -196,8 +196,7 @@ class AliengoEnv(gym.Env):
             obs = self.quadruped.get_hutter_pmtg_observation()
         elif self.env_mode == 'hutter_teacher_pmtg':
             self.t = 0.0
-            obs = self.quadruped.get_hutter_teacher_pmtg_observation(flat_ground=self.flat_ground, 
-                                                                    fake_client=self.fake_client)
+            obs = self.quadruped.get_hutter_teacher_pmtg_observation()
         elif self.env_mode == 'flat':
             obs = self.quadruped.get_observation()
         else: assert False
