@@ -23,12 +23,13 @@ class AliengoEnv(gym.Env):
                     apply_perturb=True,
                     avg_time_per_perturb=5.0, # seconds
                     max_torque=40.0, # N-m
-                    kp=0.1, # acts on position erorr
+                    kp=0.1, # acts on position error 
                     kd=1.0, # acts on rate of position erorr
                     action_repeat=4,
                     timeout=60.0, # number of seconds to timeout after
                     flat_ground=True, # this is for getting terrain scan in privileged info for Aliengo 
-                    realTime=False): # should never be True when training, only for visualzation or debugging MAYBE
+                    realTime=False, # should never be True when training, only for visualzation or debugging MAYBE
+                    vis=False):
         # Environment Options
         self.env_mode = env_mode
         self.apply_perturb = apply_perturb
@@ -44,7 +45,7 @@ class AliengoEnv(gym.Env):
         self.max_torque = max_torque
         self.kp = kp 
         self.kd = kd
-
+        self.vis = vis
         if render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
         else:
@@ -57,7 +58,8 @@ class AliengoEnv(gym.Env):
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                             max_torque=max_torque, 
                                             kp=kp, 
-                                            kd=kd)
+                                            kd=kd,
+                                            vis=vis)
         self.fake_client = None
         self.client.setGravity(0,0,-9.8)
         if self.realTime:
@@ -127,7 +129,9 @@ class AliengoEnv(gym.Env):
                 # TODO returned values will be part of privledged information for teacher training
                 wrench = self.quadruped.apply_torso_disturbance()
 
-        for _ in range(self.n_hold_frames): self.client.stepSimulation()
+        for _ in range(self.n_hold_frames): 
+            self.client.stepSimulation()
+            if self.vis: self.quadruped.visualize()
         self.eps_step_counter += 1
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)
 

@@ -52,7 +52,9 @@ class AliengoTrotInPlace(aliengo_env.AliengoEnv):
                 # TODO returned values will be part of privledged information for teacher training
                 wrench = self.quadruped.apply_torso_disturbance()
 
-        for _ in range(self.n_hold_frames): self.client.stepSimulation()
+        for _ in range(self.n_hold_frames): 
+            self.client.stepSimulation()
+            if self.vis: self.quadruped.visualize()
         self.eps_step_counter += 1
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)
 

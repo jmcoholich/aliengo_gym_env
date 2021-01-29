@@ -14,7 +14,7 @@ class Aliengo:
     def __init__(self, 
                     pybullet_client, 
                     max_torque=40.0, 
-                    kp=1.0, #TODO 
+                    kp=0.1,  
                     kd=1.0, 
                     fixed=False, 
                     fixed_position=[0,0,1.0], 
@@ -82,6 +82,8 @@ class Aliengo:
         self.last_true_joint_position_targets = None
         self.last_foot_disturbance = np.zeros(6) # this is a wrench
         self.last_torso_disturbance = np.zeros(4) # this is a foot index and a force
+
+        self.last_global_foot_target = np.zeros((4,3)) # this is only used for vis rn
 
 
     def get_hutter_teacher_pmtg_observation_bounds(self):
@@ -154,7 +156,7 @@ class Aliengo:
                 scan_points = self.privileged_info[i * self.num_foot_terrain_scan_points: \
                                                                             (i+1) * self.num_foot_terrain_scan_points] 
                 #TODO make sure these match up with the correct foot's phase
-                extra_clearance = 0.02 # less than an inch
+                extra_clearance = 0.03 # less than an inch
                 if (scan_points < 0.0 - extra_clearance).all():
                     num_clearance += 1.0
         
@@ -486,11 +488,11 @@ class Aliengo:
             for i in range(n * 4):
                 pos = np.concatenate((scan_positions[i], [raw[i][3][2]]))
                 self.client.resetBasePositionAndOrientation(self.foot_scan_balls[i], posObj=pos, ornObj=[0,0,0,1])
-                # for some reason, rendering this text increases rendering time by about 100x. Why???
-                self.client.addUserDebugText('{:.1f}'.format(relative_z[i]), 
-                                                textPosition=pos, 
-                                                replaceItemUniqueId=self.foot_text[i],
-                                                textColorRGB=[0]*3)
+                # TODO for some reason, rendering this text increases rendering time by about 100x. Why???
+                # self.client.addUserDebugText('{:.1f}'.format(relative_z[i]), 
+                #                                 textPosition=pos, 
+                #                                 replaceItemUniqueId=self.foot_text[i],
+                #                                 textColorRGB=[0]*3)
         return relative_z
             
 
@@ -517,7 +519,7 @@ class Aliengo:
         return self.link_masses
 
 
-    def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3)), debug=False):
+    def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3))):
         '''Takes parameters of a trot trajectory (defined in this function), a phase variable, and target foot position
         residuals. Calls set_foot_positions() to actuate robot. If only a cyclical phase is given and no foot position
         residuals, the robot will step in place. The frequency is in cycles per second, not radians per second. 
@@ -547,7 +549,7 @@ class Aliengo:
         foot_positions[[1,3], 1] = lateral_offset
         foot_positions[:,0] = x_offset
         foot_positions += residuals
-        self.set_foot_positions(foot_positions, debug=debug)
+        self.set_foot_positions(foot_positions)
         return phases, foot_positions # foot positions is the command in foot frame space
 
 
@@ -631,7 +633,7 @@ class Aliengo:
         return commanded_global_foot_positions
 
 
-    def set_foot_positions(self, foot_positions, debug=False):
+    def set_foot_positions(self, foot_positions):
         '''Takes a numpy array of shape (4, 3) which represents foot xyz relative to the hip joint. Uses IK to 
         calculate joint position targets and sets those targets. Does not return anything.
         The Z-foot position represents the BOTTOM of the collision sphere'''
@@ -656,18 +658,19 @@ class Aliengo:
         #                                             self.foot_links,
         #                                             targetPositions=commanded_global_foot_positions))
         self.set_joint_position_targets(joint_positions, true_positions=True)
-
-        if debug:
-            self.visualize(commanded_global_foot_positions=commanded_global_foot_positions)
+        self.last_global_foot_target = commanded_global_foot_positions
+        if self.vis:
+            self.visualize()
         
            
 
-    def visualize(self, commanded_global_foot_positions=None): #TODO make visualize a constructor kwarg
+    def visualize(self): 
         ''' green spheres are commanded positions, red spheres are actual positions. 
         TODOmaybe: add the foot coordinate frames visualization, and light up feet that are contacting.
         TODO: visualize external forces and torques.
         '''
 
+        commanded_global_foot_positions = self.last_global_foot_target
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
         for i in range(4):
             hip_offset_from_base = self.client.getJointInfo(self.quadruped, self.hip_joints[i])[14] #TODO just store this value
@@ -1117,7 +1120,7 @@ def sine_tracking_test(client, quadruped):
     counter = 0
     while True:
         command = np.array([[0.1 * np.sin(2*t), -0.1 * np.sin(2*t), -0.3  + 0.1 * np.sin(2*t)] for _ in range(4)])
-        quadruped.set_foot_positions(command, debug=True)
+        quadruped.set_foot_positions(command)
         orientation = client.getQuaternionFromEuler([np.pi/4.*np.sin(t)]*3)
         client.resetBasePositionAndOrientation(quadruped.quadruped,[-1,1,1], orientation)
 
@@ -1137,7 +1140,7 @@ def floor_tracking_test(client, quadruped):
     while True:
         z = -0.500 # decreasing this to -0.51 should show feet collision with ground and inability to track
         command = np.array([[0.1 * np.sin(2*t), 0, z] for _ in range(4)])
-        quadruped.set_foot_positions(command, debug=True)
+        quadruped.set_foot_positions(command)
         client.resetBasePositionAndOrientation(quadruped.quadruped,[0.,0.,0.5], [0.,0.,0.,1.0])
         
         client.stepSimulation()
@@ -1195,7 +1198,7 @@ def trajectory_generator_test(client, quadruped):
     # quadruped.reset_joint_positions(stochastic=False)
     # time.sleep(2)
     while True:
-        phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-0.0] * 4), debug=True)
+        phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-0.0] * 4))
         client.stepSimulation()
         time.sleep(1/240. * 1)
         if counter% 2 == 0:
