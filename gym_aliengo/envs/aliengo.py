@@ -149,6 +149,7 @@ class Aliengo:
 
         num_feet_in_swing = 0.0
         num_clearance = 0.0
+        feet_receiving_rew = []
         for i in range(4):
             if np.pi* 1.25 < self.phases[i] < 1.75 * np.pi:
                 num_feet_in_swing += 1.0
@@ -159,10 +160,21 @@ class Aliengo:
                 extra_clearance = 0.03 # less than an inch
                 if (scan_points < 0.0 - extra_clearance).all():
                     num_clearance += 1.0
+                    feet_receiving_rew.append(i)
         
         rew = 0.0
         if num_feet_in_swing > 0:
             rew = num_clearance/num_feet_in_swing
+        
+        if self.vis:
+            # turn the legs that receive the reward blue NOTE this makes the visualization very slow. Perhaps I can make
+            # separate legs that overlay them and then move out of sight, lol.
+            pass
+            # for i in range(4):
+            #     if i in feet_receiving_rew:
+            #         self.client.changeVisualShape(self.quadruped, self.shin_links[i], rgbaColor=[0, 0, 255, 0.9])
+            #     else: 
+            #         self.client.changeVisualShape(self.quadruped, self.shin_links[i], rgbaColor=[0, 0, 0, 0.75])
         return rew
 
 
@@ -263,7 +275,7 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 0.90 * foot_clearance_rew \
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
                 + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
 
 
