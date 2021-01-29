@@ -150,7 +150,7 @@ class Aliengo:
         num_feet_in_swing = 0.0
         num_clearance = 0.0
         for i in range(4):
-            if np.pi < self.phases[i] < 2 * np.pi:
+            if np.pi* 1.25 < self.phases[i] < 1.75 * np.pi:
                 num_feet_in_swing += 1.0
                 
                 scan_points = self.privileged_info[i * self.num_foot_terrain_scan_points: \
