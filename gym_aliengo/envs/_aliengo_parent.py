@@ -37,7 +37,7 @@ class AliengoEnvParent(aliengo_env.AliengoEnv):
         self.client.setTimeStep(1/240.)
         self.client.setGravity(0,0,-9.8)
         self.client.setRealTimeSimulation(self.realTime) # this has no effect in DIRECT mode, only GUI mode
-        
+
         self.plane = self.client.loadURDF(join(dirname(__file__), '../urdf/plane.urdf'))
         self.fake_plane = self.fake_client.loadURDF(join(dirname(__file__), '../urdf/plane.urdf'))
     

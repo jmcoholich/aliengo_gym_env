@@ -20,15 +20,15 @@ https://robotics.sciencemag.org/content/robotics/5/47/eabc5986.full.pdf
 
 class AliengoSteps(_aliengo_parent.AliengoEnvParent):
     def __init__(self,
-                row_width=0.5, # range from [0.1, 1.0] (hard to easy) default=0.5
+                rows_per_m=2.0, # range from [1.0 to 5.0] (easy to hard) default=2.0
                 terrain_height_range=0.25, # range from [0.0, 0.375] (easy to hard) default=0.25
                 **kwargs):
         
         super().__init__(**kwargs)
         
         # Terrain parameters, all units in meters
-        assert row_width > 0.01
-        self.row_width = row_width
+        assert rows_per_m > 0.0 and rows_per_m < 10.0
+        self.row_width = 1.0/rows_per_m
         self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
         self.terrain_length = 20  #TODO make this parameter scale with reward because terrain generation takes a lot of time 
         self.terrain_width = 3 
@@ -51,7 +51,8 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
         self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                         max_torque=self.max_torque, 
                                         kp=self.kp, 
-                                        kd=self.kd)
+                                        kd=self.kd,
+                                        vis=self.vis)
         return super().reset()
 
 

@@ -63,7 +63,8 @@ class AliengoHills(_aliengo_parent.AliengoEnvParent):
             self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
                                             max_torque=self.max_torque, 
                                             kp=self.kp, 
-                                            kd=self.kd)
+                                            kd=self.kd,
+                                            vis=self.vis)
         else: 
             self._create_hills(update=True)
 

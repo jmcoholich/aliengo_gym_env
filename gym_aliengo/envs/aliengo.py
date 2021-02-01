@@ -559,8 +559,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.25] * 4 + [-0.2] * 12) # TODO
-        ub = np.array([0.25] * 4 + [0.2] * 12) 
+        lb = np.array([-0.00001] * 4 + [-0.2] * 12) # TODO
+        ub = np.array([0.000001] * 4 + [0.2] * 12) 
         return lb, ub
 
 
@@ -707,6 +707,7 @@ class Aliengo:
                 self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
                                                             posObj=hip_joint_positions[i], 
                                                             ornObj=[0,0,0,1])
+                print('{:.3f}, {:.3f}, {:.3f}, {:.3f}'.format(*self.f_i) + ' ' * 20, end='\r', flush=True)
 
 
     def render(self, mode, client): 
