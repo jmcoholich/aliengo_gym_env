@@ -30,7 +30,7 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
         assert row_width > 0.01
         self.row_width = row_width
         self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
-        self.terrain_length = 5 #TODO  make this parameter scale with reward because terrain generation takes a lot of time 
+        self.terrain_length = 20  #TODO make this parameter scale with reward because terrain generation takes a lot of time 
         self.terrain_width = 3 
         self.terrain_height = terrain_height_range/2.0 + 0.01 # this is just the mean height of the blocks
 
