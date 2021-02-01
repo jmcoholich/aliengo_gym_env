@@ -225,24 +225,13 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.04 * base_motion_rew + 0.10 * foot_clearance_rew \
+        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
                 + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
 
 
     def trot_in_place_reward(self):
         ''' 
-        Returns the reward function specified in S4 here: 
-        https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf 
-        - however, just reward fwd movement, no angular velocity reward bc command direction (+x) never changes
-        - interestingly, all the reward functions are wrapped in an exponential function, so the agent gets
-        exponentially increasing rewards as it gets better (up to a threshold)
-
-        TODO structure code here and in environments such that I avoid repeated pybullet function calls. Perhaps this
-        function can eventually return pmtg reward AND observation. (or write another function that calls this one 
-        to do that)
-        
-        Clipping linear velocity to 1.8 based on: 
-         "...maximum walking speed exceeds 1.8 m/s" https://www.unitree.com/products/aliengo
+        A copy of the self.pmtg_reward() function, just with the forward rew replaced with a rew for staying still.
         '''
         
         speed_treshold = 0.0 # m/s
@@ -570,8 +559,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.0001] * 4 + [-0.1] * 12) # TODO
-        ub = np.array([0.0001] * 4 + [0.1] * 12) 
+        lb = np.array([-0.25] * 4 + [-0.2] * 12) # TODO
+        ub = np.array([0.25] * 4 + [0.2] * 12) 
         return lb, ub
 
 

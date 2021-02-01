@@ -111,7 +111,8 @@ class AliengoEnv(gym.Env):
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
 
         if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
-            f = action[:4]
+            # f = action[:4]
+            f = np.tile(action[0], 4) #TODO decide whether or not to keep this
             residuals = action[4:].reshape((4,3))
             self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
             self.t += 1./240. * self.n_hold_frames
