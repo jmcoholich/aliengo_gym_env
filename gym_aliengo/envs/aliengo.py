@@ -257,7 +257,7 @@ class Aliengo:
         torque_rew = -np.linalg.norm(self.applied_torques, 1)
 
         # knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
-        knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /
+        knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
                                                         np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
 
         # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
@@ -271,8 +271,8 @@ class Aliengo:
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-            + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew #+ 0.001 * knee_force_rew 
-            + 0.1 * knee_force_ratio_rew
+            + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
+            + 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
         return total_rew, rew_dict
 
 
@@ -302,7 +302,7 @@ class Aliengo:
         torque_rew = -np.linalg.norm(self.applied_torques, 1)
 
         # knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
-        knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /
+        knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
                                                         np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
 
         # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
@@ -316,8 +316,8 @@ class Aliengo:
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew #+ 0.001 * knee_force_rew
-                + 0.1 * knee_force_ratio_rew
+                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
+                + 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
         return total_rew, rew_dict
 
 
