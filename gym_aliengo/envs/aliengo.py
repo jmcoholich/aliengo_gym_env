@@ -219,6 +219,22 @@ class Aliengo:
         return rew
 
 
+    def _wide_step_rew(self):
+        '''Returns the negative average amount that the foot targets move outside the max_lateral_offset. 
+        Max reward is zero. '''
+
+        # for reference:
+        # foot_positions[[0,2], 1] = -lateral_offset
+        # foot_positions[[1,3], 1] = lateral_offset
+        rew = 0.0
+        max_lateral_offset = 0.1
+        mask1 = self.foot_target_history[0][[0,2], 1] < -np.ones(2) * max_lateral_offset # true if positions are bad
+        rew += (mask1 * (self.foot_target_history[0][[0,2], 1] + np.ones(2) * max_lateral_offset)).sum()
+        mask2 = self.foot_target_history[0][[1,3], 1] > np.ones(2) * max_lateral_offset # true if positions are bad
+        rew += -(mask2 * (self.foot_target_history[0][[1,3], 1] - np.ones(2) * max_lateral_offset)).sum()
+        return rew/4.0
+
+
     def pmtg_reward(self):
         ''' 
         Returns the reward function specified in S4 here: 
@@ -257,8 +273,10 @@ class Aliengo:
         torque_rew = -np.linalg.norm(self.applied_torques, 1)
 
         # knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
-        knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
-                                                        np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
+        # knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
+        #                                                 np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
+
+        wide_step_rew = self._wide_step_rew()
 
         # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
         # add terms of reward function
@@ -266,13 +284,14 @@ class Aliengo:
                         'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
                         'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew,
                         # 'knee_force_rew':knee_force_rew}
-                        'knee_force_ratio_rew':knee_force_ratio_rew}
+                        # 'knee_force_ratio_rew':knee_force_ratio_rew}
+                        'wide_step_rew':wide_step_rew}
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
             + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
-            + 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
+            + 10.0 * wide_step_rew #0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
         return total_rew, rew_dict
 
 
@@ -302,8 +321,10 @@ class Aliengo:
         torque_rew = -np.linalg.norm(self.applied_torques, 1)
 
         # knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
-        knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
-                                                        np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
+        # knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
+        #                                                 np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
+
+        wide_step_rew = self._wide_step_rew()
 
         # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
         # add terms of reward function
@@ -311,13 +332,14 @@ class Aliengo:
                         'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
                         'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew,
                         # 'knee_force_rew':knee_force_rew}
-                        'knee_force_ratio_rew':knee_force_ratio_rew}
+                        # 'knee_force_ratio_rew':knee_force_ratio_rew}
+                        'wide_step_rew':wide_step_rew}
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
                 + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
-                + 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
+                + 10.0 * wide_step_rew # 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
         return total_rew, rew_dict
 
 
@@ -1380,8 +1402,19 @@ if __name__ == '__main__':
     #     print(time.time() - begin)
     
     
-    test_calf_joint_torques(client, quadruped)
+    # test_calf_joint_torques(client, quadruped)
 
+    foot_positions = np.zeros((4, 3))
+    lateral_offset = 0.15
+    foot_positions[:,-1] = -0.4
+    foot_positions[[0,2], 1] = -lateral_offset
+    foot_positions[[1,3], 1] = lateral_offset
+    quadruped.reset_joint_positions()
+    quadruped._wide_step_rew()
+    while True:
+        client.stepSimulation()
+        quadruped.set_foot_positions(foot_positions)
+        time.sleep(1./240)
 
     # while True:
     #     quadruped.get_privledged_terrain_info(client)
