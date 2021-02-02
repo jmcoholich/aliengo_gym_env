@@ -291,7 +291,7 @@ class Aliengo:
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
             + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
-            + 10.0 * wide_step_rew #0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
+            + 2.0 * wide_step_rew #0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
         return total_rew, rew_dict
 
 
@@ -339,7 +339,7 @@ class Aliengo:
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
                 + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
-                + 10.0 * wide_step_rew # 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
+                + 2.0 * wide_step_rew # 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
         return total_rew, rew_dict
 
 
