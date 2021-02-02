@@ -22,7 +22,7 @@ class AliengoEnv(gym.Env):
                     env_mode='pmtg',
                     apply_perturb=True,
                     avg_time_per_perturb=5.0, # seconds
-                    max_torque=40.0, # N-m
+                    max_torque=44.4, # N-m, from URDF
                     kp=0.1, # acts on position error 
                     kd=1.0, # acts on rate of position erorr
                     action_repeat=4,

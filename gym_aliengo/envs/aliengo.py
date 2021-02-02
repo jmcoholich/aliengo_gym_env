@@ -13,7 +13,7 @@ import sys
 class Aliengo:
     def __init__(self, 
                     pybullet_client, 
-                    max_torque=40.0, 
+                    max_torque=44.4, # from URDF 
                     kp=0.1,  
                     kd=1.0, 
                     fixed=False, 
@@ -85,7 +85,45 @@ class Aliengo:
 
         self.last_global_foot_target = np.zeros((4,3)) # this is only used for vis rn
 
+        # enable force/torque sensing for knee joints, to avoid walking that excessively loads them
+        for joint in self.knee_joints: 
+            self.client.enableJointForceTorqueSensor(self.quadruped, joint, enableSensor=True)
 
+
+    def _init_vis(self):
+        small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 155, 255, 0.75])
+        self.foot_scan_balls = [0] * self.num_foot_terrain_scan_points * 4
+        self.foot_text = [0] * self.num_foot_terrain_scan_points * 4
+        for i in range(self.num_foot_terrain_scan_points * 4):
+            self.foot_scan_balls[i] = self.client.createMultiBody(baseVisualShapeIndex=small_ball)
+            self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME,1)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        # self.client.configureDebugVisualizer(p.COV_ENABLE_TINY_RENDERER, 0) # perhaps my GPU rendering just isn't workin
+        # for some reason, since this option doesn't change performance at all.
+
+        # for vis coordinate system
+        self.line_length = 0.25
+        self.line_ids = [[0]*3]*4
+        self.line_width = 5
+        for i in range(4):
+            self.line_ids[i][0] = self.client.addUserDebugLine([0,0,0], [self.line_length,0,0], lineColorRGB=[1,0,0], 
+                                                            parentLinkIndex=self.thigh_links[i],
+                                                            parentObjectUniqueId=self.quadruped,
+                                                            lineWidth=self.line_width)
+            self.line_ids[i][1] = self.client.addUserDebugLine([0,0,0], [0,self.line_length,0], lineColorRGB=[0,1,0], 
+                                                            parentLinkIndex=self.thigh_links[i],
+                                                            parentObjectUniqueId=self.quadruped,
+                                                            lineWidth=self.line_width)
+            self.line_ids[i][2] = self.client.addUserDebugLine([0,0,0], [0,0,self.line_length], lineColorRGB=[0,0,1], 
+                                                            parentLinkIndex=self.thigh_links[i],
+                                                            parentObjectUniqueId=self.quadruped,
+                                                            lineWidth=self.line_width)
+
+        
+
+    
     def get_hutter_teacher_pmtg_observation_bounds(self):
         # breakpoint()
         obs_lb, obs_ub = self.get_hutter_pmtg_observation_bounds()
@@ -126,6 +164,9 @@ class Aliengo:
         self.joint_velocities = np.array([joint_states[i][1] for i in range(self.n_motors)])
         self.reaction_forces  = np.array([joint_states[i][2] for i in range(self.n_motors)])
         self.applied_torques  = np.array([joint_states[i][3] for i in range(self.n_motors)])
+        # print(self.reaction_forces[[2,5,8,11]], end='\n\n')
+        # print(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]], end='\n\n')
+        # print(-np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum())
 
         temp = self.client.getBasePositionAndOrientation(self.quadruped) # orientation in quaternions
         self.base_position, self.base_orientation = (np.array(temp[0]), np.array(temp[1]))
@@ -213,20 +254,22 @@ class Aliengo:
         target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
                                                                                             self.foot_target_history[2])
 
-        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
-        applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
-        torque_rew = -np.linalg.norm(applied_torques, 1)
+        torque_rew = -np.linalg.norm(self.applied_torques, 1)
+
+        knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
 
         # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
         # add terms of reward function
         rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
                         'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
-                        'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew}
+                        'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew,
+                        'knee_force_rew':knee_force_rew}
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
+        total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
+            + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew + 0.01 * knee_force_rew
+        return total_rew, rew_dict
 
 
     def trot_in_place_reward(self):
@@ -252,20 +295,22 @@ class Aliengo:
         target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
                                                                                             self.foot_target_history[2])
 
-        joint_states = self.client.getJointStates(self.quadruped, self.motor_joint_indices)
-        applied_torques = np.array([joint_states[i][3] for i in range(self.n_motors)])
-        torque_rew = -np.linalg.norm(applied_torques, 1)
+        torque_rew = -np.linalg.norm(self.applied_torques, 1)
+
+        knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
 
         # rew_dict includes all the things I want to keep track of an average over an entire episode, to be logged
         # add terms of reward function
         rew_dict = {'lin_vel_rew': lin_vel_rew, 'base_motion_rew': base_motion_rew, 
                         'body_collision_rew':body_collision_rew, 'target_smoothness_rew':target_smoothness_rew,
-                        'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew}
+                        'torque_rew':torque_rew, 'angular_rew': angular_rew, 'foot_clearance_rew': foot_clearance_rew,
+                        'knee_force_rew':knee_force_rew}
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        return 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew, rew_dict
+        total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
+                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew + 0.01 * knee_force_rew
+        return total_rew, rew_dict
 
 
     def get_hutter_pmtg_observation(self, noisy=False):
@@ -401,20 +446,6 @@ class Aliengo:
         self.state_is_updated = False
 
     
-    def _init_vis(self):
-        small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 155, 255, 0.75])
-        self.foot_scan_balls = [0] * self.num_foot_terrain_scan_points * 4
-        self.foot_text = [0] * self.num_foot_terrain_scan_points * 4
-        for i in range(self.num_foot_terrain_scan_points * 4):
-            self.foot_scan_balls[i] = self.client.createMultiBody(baseVisualShapeIndex=small_ball)
-            self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
-        # self.client.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME,1)
-        # self.client.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
-        # self.client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
-        # self.client.configureDebugVisualizer(p.COV_ENABLE_TINY_RENDERER, 0) # perhaps my GPU rendering just isn't workin
-        # for some reason, since this option doesn't change performance at all.
-        
-
     def get_privileged_info(self, fake_client=None, flat_ground=False, ray_start=100):
         ''' 
         Priveledged info includes
@@ -1116,6 +1147,24 @@ class Aliengo:
         return self.foot_target_history[0]
 
 
+            
+    def _vis_coordinate_system(self):
+        self.line_length = 0.25
+        for i in range(4):
+            self.client.addUserDebugLine([0,0,0], [self.line_length,0,0], lineColorRGB=[1,0,0], 
+                                        parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][0],
+                                        parentObjectUniqueId=self.quadruped,
+                                        lineWidth=self.line_width)
+            self.client.addUserDebugLine([0,0,0], [0,self.line_length,0], lineColorRGB=[0,1,0], 
+                                        parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][1],
+                                        parentObjectUniqueId=self.quadruped,
+                                        lineWidth=self.line_width)
+            self.client.addUserDebugLine([0,0,0], [0,0,self.line_length], lineColorRGB=[0,0,1], 
+                                        parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][2],
+                                        parentObjectUniqueId=self.quadruped,
+                                        lineWidth=self.line_width)
+
+
 def sine_tracking_test(client, quadruped):
     # test foot position command tracking and print tracking error
     t = 0
@@ -1173,12 +1222,12 @@ def calculate_tracking_error(commanded_foot_positions, client, quadruped):
         # actual_pos = np.array([i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)])
 
 
-        errors = abs(commanded_foot_positions - quadruped._get_foot_frame_foot_positions())
-        print('Maximum tracking error: {:e}'.format(errors.max()))
-        print('Mean tracking error: {:e}'.format(errors.mean()))
-        # print(commanded_global_foot_positions - actual_pos)
-        print()
-
+    errors = abs(commanded_foot_positions - quadruped._get_foot_frame_foot_positions())
+    print('Maximum tracking error: {:e}'.format(errors.max()))
+    print('Mean tracking error: {:e}'.format(errors.mean()))
+    # print(commanded_global_foot_positions - actual_pos)
+    print()
+    
 
 def plot_trajectory():
     import matplotlib.pyplot as plt 
@@ -1259,6 +1308,43 @@ def test_disturbances(client, quadruped):
         client.stepSimulation()
         counter += 1
 
+
+def test_calf_joint_torques(client, quadruped):
+    # quadruped.reset_joint_positions(stochastic=False)
+    quadruped.foot_target_history = [quadruped._get_foot_frame_foot_positions()] * 3
+    quadruped.phases = np.array([0, np.pi, np.pi, 0])
+    quadruped.f_i = np.zeros(4)
+    quadruped.joint_pos_error_history = [np.zeros(12)] * 3 
+    quadruped.joint_velocity_history = [np.zeros(12)] * 3
+    quadruped.last_true_joint_position_targets = np.zeros(12)
+
+
+    hip_offset_from_base = client.getJointInfo(quadruped.quadruped, quadruped.hip_joints[0])[14] #TODO just store this value
+    base_p, base_o = client.getBasePositionAndOrientation(quadruped.quadruped)
+    hip_joint_position, _ = np.array(client.multiplyTransforms(positionA=base_p,
+                                            orientationA=base_o,
+                                            positionB=hip_offset_from_base,
+                                            orientationB=[0.0, 0.0, 0.0, 1.0]))
+    pos = np.array(hip_joint_position) - np.array([0,0,1])
+    # cstr = client.createConstraint(quadruped.quadruped, quadruped.thigh_links[0], -1, -1, p.JOINT_FIXED, 
+                                                                                                # [0,0,0], [0,0,0], pos)
+    # client.changeConstraint(cstr, maxForce=1e10)
+    while True:
+        client.resetJointState(quadruped.quadruped, quadruped.thigh_joints[0], 0)
+        client.resetJointState(quadruped.quadruped, quadruped.hip_joints[0], 0)
+        force = [0,0, 0]
+        torque = [10,0, 0]
+        # client.applyExternalForce(quadruped.quadruped, quadruped.shin_links[0], force, [0,0,0], p.WORLD_FRAME)
+        client.applyExternalTorque(quadruped.quadruped, quadruped.shin_links[0], torque, p.WORLD_FRAME)
+        client.stepSimulation()
+
+
+        quadruped.update_state(flat_ground=True)
+        print(quadruped.reaction_forces[2], end='\n\n')
+        time.sleep(1.0/240)
+
+
+
 if __name__ == '__main__':
     # plot_trajectory()
 
@@ -1270,11 +1356,11 @@ if __name__ == '__main__':
     client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[1.0,-1.0,0.5], kp=1.0, vis=True)
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[0.15,-0.15,0.7], kp=1.0, vis=True)
 
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
-    trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
+    # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
     # quadruped.reset_joint_positions()
@@ -1284,7 +1370,10 @@ if __name__ == '__main__':
     #     quadruped._get_foot_terrain_scan(flat_ground=True)
     #     client.stepSimulation()
     #     print(time.time() - begin)
-        
+    
+    
+    test_calf_joint_torques(client, quadruped)
+
 
     # while True:
     #     quadruped.get_privledged_terrain_info(client)
