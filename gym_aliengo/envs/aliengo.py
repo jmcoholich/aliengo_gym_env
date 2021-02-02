@@ -227,7 +227,7 @@ class Aliengo:
         # foot_positions[[0,2], 1] = -lateral_offset
         # foot_positions[[1,3], 1] = lateral_offset
         rew = 0.0
-        max_lateral_offset = 0.1
+        max_lateral_offset = 0.11
         mask1 = self.foot_target_history[0][[0,2], 1] < -np.ones(2) * max_lateral_offset # true if positions are bad
         rew += (mask1 * (self.foot_target_history[0][[0,2], 1] + np.ones(2) * max_lateral_offset)).sum()
         mask2 = self.foot_target_history[0][[1,3], 1] > np.ones(2) * max_lateral_offset # true if positions are bad
