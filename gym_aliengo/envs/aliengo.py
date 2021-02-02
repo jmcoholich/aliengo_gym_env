@@ -265,7 +265,7 @@ class Aliengo:
 
         foot_clearance_rew = self._foot_clearance_rew()
 
-        body_collision_rew = -self._is_non_foot_ground_contact() # max is 0
+        body_collision_rew = -(self._is_non_foot_ground_contact() + self.self_collision())
 
         target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
                                                                                             self.foot_target_history[2])
@@ -313,7 +313,7 @@ class Aliengo:
 
         foot_clearance_rew = self._foot_clearance_rew()
 
-        body_collision_rew = -self._is_non_foot_ground_contact() # max is 0
+        body_collision_rew = -(self._is_non_foot_ground_contact() + self.self_collision())
 
         target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
                                                                                             self.foot_target_history[2])
@@ -1013,15 +1013,16 @@ class Aliengo:
         
         return quadruped
 
+
     def remove_body(self):
         self.client.removeBody(self.quadruped)
         
 
     def self_collision(self):
-        '''Returns true if any of the robot links are colliding with any other link'''
+        '''Returns number of robot self-collision points.'''
 
         points = self.client.getContactPoints(self.quadruped, self.quadruped)
-        return len(points) > 0
+        return len(points)
 
 
     def set_joint_position_targets(self, positions, true_positions=False):
