@@ -268,7 +268,7 @@ class Aliengo:
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-            + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew + 0.01 * knee_force_rew
+            + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew + 0.001 * knee_force_rew
         return total_rew, rew_dict
 
 
@@ -309,7 +309,7 @@ class Aliengo:
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew + 0.01 * knee_force_rew
+                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew + 0.001 * knee_force_rew
         return total_rew, rew_dict
 
 
