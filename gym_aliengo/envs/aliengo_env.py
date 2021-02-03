@@ -29,7 +29,8 @@ class AliengoEnv(gym.Env):
                     timeout=60.0, # number of seconds to timeout after
                     flat_ground=True, # this is for getting terrain scan in privileged info for Aliengo 
                     realTime=False, # should never be True when training, only for visualzation or debugging MAYBE
-                    vis=False):
+                    vis=False,
+                    gait_type='trot'):
         # Environment Options
         self.env_mode = env_mode
         self.apply_perturb = apply_perturb
@@ -59,7 +60,8 @@ class AliengoEnv(gym.Env):
                                             max_torque=max_torque, 
                                             kp=kp, 
                                             kd=kd,
-                                            vis=vis)
+                                            vis=vis,
+                                            gait_type=gait_type)
         self.fake_client = None
         self.client.setGravity(0,0,-9.8)
         if self.realTime:

@@ -19,12 +19,17 @@ class Aliengo:
                     fixed=False, 
                     fixed_position=[0,0,1.0], 
                     fixed_orientation=[0,0,0], 
-                    vis=False):
+                    vis=False,
+                    gait_type='trot'):
+        
+        if gait_type not in ['trot', 'walk']:
+            raise ValueError('Current gait must be of type "walk" or "trot".')
         self.max_torque = max_torque
         self.kp = kp
         self.kd = kd
         self.client = pybullet_client
         self.n_motors = 12
+        self.gait_type = gait_type
 
         self.foot_links = [5, 9, 13, 17]
         self.shin_links = [4, 8, 12, 16]
@@ -151,7 +156,6 @@ class Aliengo:
 
 
     def get_hutter_teacher_pmtg_observation(self):
-        # breakpoint()
         return np.concatenate((self.get_hutter_pmtg_observation(), self.privileged_info))
 
 
@@ -290,7 +294,7 @@ class Aliengo:
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-            + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
+            + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
             + 2.0 * wide_step_rew #0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
         return total_rew, rew_dict
 
@@ -338,7 +342,7 @@ class Aliengo:
         rew_dict['x_vel'] = self.base_vel[0]
 
         total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-                + 0.02 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
+                + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
                 + 2.0 * wide_step_rew # 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
         return total_rew, rew_dict
 
@@ -592,13 +596,20 @@ class Aliengo:
         step_bottom = -0.45 # from paper
         lateral_offset = 0.075 # how much to push the feet out 
         x_offset = 0.02109375 # experimental, close to balance 
-        f0 = 2.25 # 1.25 is from paper
 
         assert t >= 0
         assert f.size == 4
         assert residuals.shape == (4,3)
-        trot_phase_offsets = np.array([0, np.pi, np.pi, 0])
-        phases = (trot_phase_offsets + (f0 + f) * 2 * np.pi * t) % (2 * np.pi)
+        if self.gait_type == 'trot':
+            phase_offsets = np.array([0, np.pi, np.pi, 0])
+            f0 = 2.00 # 1.25 is from paper
+        elif self.gait_type == 'walk':
+            # phase_offsets = np.array([1.5, 0.5, 1.0, 0])  * np.pi #FR, FL, RR, RL
+            phase_offsets = np.array([0.0, 1.0, 0.5, 1.5]) * np.pi #FR, FL, RR, RL
+            # phase_offsets = np.array([np.pi,0,0,0]) #FR, FL, RR, RL
+            f0 = 1.0 # 1.25 is from paper
+
+        phases = (phase_offsets + (f0 + f) * 2 * np.pi * t) % (2 * np.pi)
         self.phases = phases
         self.f_i = f
 
@@ -1387,11 +1398,12 @@ if __name__ == '__main__':
     client.setRealTimeSimulation(0) # this has no effect in DIRECT mode, only GUI mode
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
-    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[0.15,-0.15,0.7], kp=1.0, vis=True)
+    quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[0.15,-0.15,0.7], kp=1.0, 
+                        vis=False, gait_type='walk')
 
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
-    # trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
+    trajectory_generator_test(client, quadruped) # tracking performance is easily increased by setting kp=1.0
     # axes_shift_function_test(client, quadruped) # error should be about 2e-17
     # test_disturbances(client, quadruped) # unfix the base to actually see results of disturbances
     # quadruped.reset_joint_positions()
@@ -1406,7 +1418,7 @@ if __name__ == '__main__':
     # test_calf_joint_torques(client, quadruped)
 
     foot_positions = np.zeros((4, 3))
-    lateral_offset = 0.15
+    lateral_offset = 0.11
     foot_positions[:,-1] = -0.4
     foot_positions[[0,2], 1] = -lateral_offset
     foot_positions[[1,3], 1] = lateral_offset
@@ -1415,6 +1427,7 @@ if __name__ == '__main__':
     while True:
         client.stepSimulation()
         quadruped.set_foot_positions(foot_positions)
+        print(quadruped.self_collision(), 'asdf')
         time.sleep(1./240)
 
     # while True:
