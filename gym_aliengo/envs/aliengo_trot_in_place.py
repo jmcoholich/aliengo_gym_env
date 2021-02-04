@@ -78,7 +78,7 @@ class AliengoTrotInPlace(aliengo_env.AliengoEnv):
             raise NotImplementedError
             # rew, rew_dict = self.quadruped.reward()
         else: assert False
-        self._update_mean_rew_dict(rew_dict)
+        self.update_mean_rew_dict(rew_dict)
 
         if done:
             info['distance_traveled']   = self.quadruped.base_position[0]

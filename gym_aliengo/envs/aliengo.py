@@ -190,14 +190,17 @@ class Aliengo:
         joint_pos_com = action[12:]
 
         a = self.set_foot_positions(foot_pos_com, return_joint_targets=True)
-        b = self._actions_to_positions(joint_pos_com)
+        # b = self._actions_to_positions(joint_pos_com)
+        b = joint_pos_com * self.position_range * 0.5
         self.set_joint_position_targets(a + b, true_positions=True)
 
 
     def footstep_param_action_bounds(self):
-        lb = np.concatenate((np.array([-0.2] * 12),
+        lb = np.concatenate((np.array([-0.2, -0.2, -0.6] * 4),
                             -np.ones(12)))
-        return lb, -lb
+        ub = np.concatenate((np.array([0.2, 0.2, -0.1] * 4),
+                            np.ones(12)))
+        return lb, ub
 
 
 
@@ -337,8 +340,8 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-            + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
+        total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.00 * foot_clearance_rew \
+            + 0.20 * body_collision_rew + 0.30 * target_smoothness_rew + 2e-5 * torque_rew \
             + 2.0 * wide_step_rew #0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew 
         return total_rew, rew_dict
 
@@ -385,8 +388,8 @@ class Aliengo:
         # other stuff to track
         rew_dict['x_vel'] = self.base_vel[0]
 
-        total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.80 * foot_clearance_rew \
-                + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew + 2e-5 * torque_rew \
+        total_rew = 0.50 * lin_vel_rew + 0.05 * angular_rew + 0.10 * base_motion_rew + 1.00 * foot_clearance_rew \
+                + 0.20 * body_collision_rew + 0.30 * target_smoothness_rew + 2e-5 * torque_rew \
                 + 2.0 * wide_step_rew # 0.1 * knee_force_ratio_rew #+ 0.001 * knee_force_rew
         return total_rew, rew_dict
 

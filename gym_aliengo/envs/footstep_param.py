@@ -20,7 +20,7 @@ then later I can train it based on the success of a well-trained quadruped agent
 
 
 Train this agent with 
-main.py --env-name gym_aliengo:FootstepParam-v0 --wandb-project FootstepParam-v0 --recurrent-policy --num-processes 40 --num-steps 300 --seed 3051466742 --entropy-coef 0.02 --gpu-idx 2
+main.py --env-name gym_aliengo:FootstepParam-v0 --wandb-project FootstepParam-v0 --recurrent-policy --num-processes 40 --num-steps 300 --seed 3051466742 --entropy-coef 0.01 --gpu-idx 2
 
 
 Termination: same as parent
@@ -272,12 +272,20 @@ class FootstepParam(aliengo_env.AliengoEnv):
     
 
 if __name__ == '__main__':
-    env = FootstepParam(render=True, vis=True)
+    env = FootstepParam(render=True, vis=True, fixed=True)
     env.reset(stochastic=False)
-    # TODO make sure there are no randomization or disturbances, since I'm giving it a completely deterministic footstep
-    # sequence
-    # env.quadruped.visualize()
-    # env.generate_footstep_locations()
-    # env.step(np.zeros_like(env.action_space.high))
+    foot_positions = np.zeros((4, 3))
+    lateral_offset = 0.11
+    foot_positions[:,-1] = -0.4
+    foot_positions[[0,2], 1] = -lateral_offset
+    foot_positions[[1,3], 1] = lateral_offset
+    action =  np.concatenate((foot_positions.flatten(), 
+                        np.zeros(12)))# first 12 is footstep xyz position, last 12 is added joint positions
+                        # env.quadruped._positions_to_actions(np.zeros(12))))# first 12 is footstep xyz position, last 12 is added joint positions
+    # action = env.action_space.high
+    # action[12:] = 0.0
     while True:
-        time.sleep(10)
+        env.step(action)
+        # env.quadruped.set_foot_positions(foot_positions)
+        # env.client.stepSimulation()
+        time.sleep(1/240.0 * 4)

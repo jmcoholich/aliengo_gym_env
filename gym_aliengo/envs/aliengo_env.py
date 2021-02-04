@@ -30,7 +30,7 @@ class AliengoEnv(gym.Env):
                     flat_ground=True, # this is for getting terrain scan in privileged info for Aliengo 
                     realTime=False, # should never be True when training, only for visualzation or debugging MAYBE
                     vis=False,
-                    gait_type='trot'):
+                    **aliengo_kwargs):
         # Environment Options
         self.env_mode = env_mode
         self.apply_perturb = apply_perturb
@@ -61,7 +61,7 @@ class AliengoEnv(gym.Env):
                                             kp=kp, 
                                             kd=kd,
                                             vis=vis,
-                                            gait_type=gait_type)
+                                            **aliengo_kwargs)
         self.fake_client = None
         self.client.setGravity(0,0,-9.8)
         if self.realTime:
