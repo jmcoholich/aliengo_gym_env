@@ -30,6 +30,11 @@ register(
     entry_point='gym_aliengo.envs:AliengoTrotInPlace',
 )
 
+register(
+    id='FootstepParam-v0',
+    entry_point='gym_aliengo.envs:FootstepParam',
+)
+
 
 # register(
 #     id='MinitaurBulletEnv_PathFollow-v0',

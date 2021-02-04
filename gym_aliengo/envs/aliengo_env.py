@@ -158,7 +158,7 @@ class AliengoEnv(gym.Env):
             raise NotImplementedError
             # rew, rew_dict = self.quadruped.reward()
         else: assert False
-        self._update_mean_rew_dict(rew_dict)
+        self.update_mean_rew_dict(rew_dict)
 
         if done:
             info['distance_traveled']   = self.quadruped.base_position[0]
@@ -167,7 +167,7 @@ class AliengoEnv(gym.Env):
         return obs, rew, done, info
 
 
-    def _update_mean_rew_dict(self, rew_dict):
+    def update_mean_rew_dict(self, rew_dict):
         '''Update self.mean_rew_dict, which keeps a running average of all terms of the reward. At the end of the 
         episode, the average will be logged. '''
 
@@ -182,7 +182,7 @@ class AliengoEnv(gym.Env):
             assert False
             
 
-    def reset(self, base_height=0.48): 
+    def reset(self, base_height=0.48, stochastic=True): 
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. '''
 
@@ -191,7 +191,7 @@ class AliengoEnv(gym.Env):
                                             posObj=[0,0,base_height], 
                                             ornObj=[0,0,0,1.0]) 
 
-        self.quadruped.reset_joint_positions(stochastic=True) 
+        self.quadruped.reset_joint_positions(stochastic=stochastic) 
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)

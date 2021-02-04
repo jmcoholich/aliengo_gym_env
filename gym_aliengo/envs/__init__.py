@@ -4,3 +4,4 @@ from gym_aliengo.envs.aliengo_hills import AliengoHills
 from gym_aliengo.envs.aliengo_steps import AliengoSteps
 from gym_aliengo.envs.aliengo_stairs import AliengoStairs
 from gym_aliengo.envs.aliengo_trot_in_place import AliengoTrotInPlace
+from gym_aliengo.envs.footstep_param import FootstepParam

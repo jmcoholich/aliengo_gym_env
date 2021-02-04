@@ -50,12 +50,12 @@ class Aliengo:
 
         self._debug_ids = [] # this is for the visualization when debug = True for heightmap
 
-        self.init_vis = True #TODO get rid of this 
+        self._init_vis = True #TODO get rid of this 
         
         self.num_foot_terrain_scan_points = 10 # per foot
         self.vis = vis
         if vis:
-            self._init_vis()
+            self.init_vis()
 
         # state variables
         self.joint_positions  = np.zeros(12)
@@ -84,7 +84,7 @@ class Aliengo:
         self.foot_target_history = [None] * 3
         self.joint_pos_error_history = [None] * 3 # used in Hutter PMTG observation
         self.joint_velocity_history = [None] * 3 # used in Hutter PMTG observation
-        self.last_true_joint_position_targets = None
+        self.true_joint_position_target_history = [None] * 3
         self.last_foot_disturbance = np.zeros(6) # this is a wrench
         self.last_torso_disturbance = np.zeros(4) # this is a foot index and a force
 
@@ -95,7 +95,7 @@ class Aliengo:
             self.client.enableJointForceTorqueSensor(self.quadruped, joint, enableSensor=True)
 
 
-    def _init_vis(self):
+    def init_vis(self):
         small_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 155, 255, 0.75])
         self.foot_scan_balls = [0] * self.num_foot_terrain_scan_points * 4
         self.foot_text = [0] * self.num_foot_terrain_scan_points * 4
@@ -159,7 +159,50 @@ class Aliengo:
         return np.concatenate((self.get_hutter_pmtg_observation(), self.privileged_info))
 
 
-    def update_state(self, flat_ground, fake_client=None):
+    def footstep_param_obs(self):
+
+        if not self.state_is_updated:
+            raise ValueError('State has not been updated since last "get observation" call.')
+
+        obs = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation),
+                            self.base_vel, #TODO write a state estimator for this stuff, for actual robot
+                            self.base_avel,
+                            self.joint_positions,
+                            self.joint_velocities,
+                            self.applied_torques,
+                            self.foot_target_history[0].flatten(),
+                            # Not sure if these latter two are actually functioning as intended, since I'm keeping them
+                            # at the same resolution as the actions are given. But they at least help, so I'll include 
+                            # them.
+                            np.array(self.joint_pos_error_history).flatten(),
+                            np.array(self.joint_velocity_history).flatten()))  
+
+        self.state_is_updated = False
+        return obs
+
+
+    def footstep_param_obs_bounds(self):
+        return -np.ones(129 + 4), np.ones(129 + 4)
+
+
+    def footstep_param_action(self, action):
+        foot_pos_com = action[:12].reshape(4, 3)
+        joint_pos_com = action[12:]
+
+        a = self.set_foot_positions(foot_pos_com, return_joint_targets=True)
+        b = self._actions_to_positions(joint_pos_com)
+        self.set_joint_position_targets(a + b, true_positions=True)
+
+
+    def footstep_param_action_bounds(self):
+        lb = np.concatenate((np.array([-0.2] * 12),
+                            -np.ones(12)))
+        return lb, -lb
+
+
+
+
+    def update_state(self, flat_ground, fake_client=None, update_priv_info=True):
         '''Updates state of the quadruped. This should be called once per env.step() and once per env.reset(). 
         The state is not the same as the observation. Returns nothing.'''
 
@@ -179,11 +222,12 @@ class Aliengo:
 
         # most recent value stored in index 0
         self.joint_pos_error_history.pop() 
-        self.joint_pos_error_history.insert(0, self.joint_positions - self.last_true_joint_position_targets) 
+        self.joint_pos_error_history.insert(0, self.joint_positions - self.true_joint_position_target_history[0]) 
         self.joint_velocity_history.pop()
         self.joint_velocity_history.insert(0, self.joint_velocities)
 
-        self.privileged_info = self.get_privileged_info(flat_ground=flat_ground, fake_client=fake_client)
+        if update_priv_info:
+            self.privileged_info = self.get_privileged_info(flat_ground=flat_ground, fake_client=fake_client)
 
         self.state_is_updated = True
 
@@ -269,7 +313,7 @@ class Aliengo:
 
         foot_clearance_rew = self._foot_clearance_rew()
 
-        body_collision_rew = -(self._is_non_foot_ground_contact() + self.self_collision())
+        body_collision_rew = -(self.is_non_foot_ground_contact() + self.self_collision())
 
         target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
                                                                                             self.foot_target_history[2])
@@ -317,7 +361,7 @@ class Aliengo:
 
         foot_clearance_rew = self._foot_clearance_rew()
 
-        body_collision_rew = -(self._is_non_foot_ground_contact() + self.self_collision())
+        body_collision_rew = -(self.is_non_foot_ground_contact() + self.self_collision())
 
         target_smoothness_rew = - np.linalg.norm(self.foot_target_history[0] - 2 * self.foot_target_history[1] + \
                                                                                             self.foot_target_history[2])
@@ -651,7 +695,7 @@ class Aliengo:
             return 2*k*k*k - 9*k*k + 12*k - 4
 
     
-    def _get_foot_frame_foot_positions(self, global_pos=None):
+    def get_foot_frame_foot_positions(self, global_pos=None):
         '''Returns the position of the feet in the same frame of the set_foot_positions() argument. Z position is the 
         bottom of the foot collision spheres. Return is of shape (4, 3).
 
@@ -683,7 +727,7 @@ class Aliengo:
 
 
     def _foot_frame_pos_to_global(self, foot_frame_pos):
-        '''Takes foot frame positions and outputs global coordinates. Inverse of _get_foot_frame_foot_positions().'''
+        '''Takes foot frame positions and outputs global coordinates. Inverse of get_foot_frame_foot_positions().'''
         
         hip_joint_positions = np.zeros((4, 3)) # storing these for use when debug
         commanded_global_foot_positions = np.zeros((4, 3))
@@ -706,7 +750,7 @@ class Aliengo:
         return commanded_global_foot_positions
 
 
-    def set_foot_positions(self, foot_positions):
+    def set_foot_positions(self, foot_positions, return_joint_targets=False):
         '''Takes a numpy array of shape (4, 3) which represents foot xyz relative to the hip joint. Uses IK to 
         calculate joint position targets and sets those targets. Does not return anything.
         The Z-foot position represents the BOTTOM of the collision sphere'''
@@ -730,6 +774,8 @@ class Aliengo:
         # joint_positions = np.array(self.client.calculateInverseKinematics2(self.quadruped,
         #                                             self.foot_links,
         #                                             targetPositions=commanded_global_foot_positions))
+        if return_joint_targets:
+            return joint_positions
         self.set_joint_position_targets(joint_positions, true_positions=True)
         self.last_global_foot_target = commanded_global_foot_positions
         if self.vis:
@@ -753,7 +799,7 @@ class Aliengo:
                                                     positionB=hip_offset_from_base,
                                                     orientationB=[0.0, 0.0, 0.0, 1.0]))
 
-        if self.init_vis:
+        if self._init_vis:
             # balls are same radius as foot collision sphere
             commanded_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.0265, rgbaColor=[0, 100, 0, 1.0])
             actual_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.0265, rgbaColor=[255, 0, 0, 1.0])
@@ -769,7 +815,7 @@ class Aliengo:
             for i in range(4):
                 self.hip_ball_ids[i] = self.client.createMultiBody(baseVisualShapeIndex=actual_ball, 
                                                                     basePosition=hip_joint_positions[i])
-            self.init_vis = False
+            self._init_vis = False
         else:
             for i in range(4):
                 if commanded_global_foot_positions is not None:
@@ -837,7 +883,7 @@ class Aliengo:
             #                 (200, 60 + 20 * i), 
             #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             # img = putText(np.float32(img), 
-            #                 'Body Contact: ' + str(self._is_non_foot_ground_contact()), 
+            #                 'Body Contact: ' + str(self.is_non_foot_ground_contact()), 
             #                 (200, 60 + 20 * 4), 
             #                 FONT_HERSHEY_SIMPLEX, 0.375, (0,0,0))
             # img = putText(np.float32(img), 
@@ -850,7 +896,7 @@ class Aliengo:
             return
 
 
-    def apply_torso_disturbance(self, wrench=None, max_force_mag=50, max_torque_mag=5): # TODO took 1e2 off mags
+    def apply_torso_disturbance(self, wrench=None, max_force_mag=5000 * 0, max_torque_mag=500 * 0): 
         '''Applies a given wrench to robot torso, or defaults to a random wrench. Only lasts for one timestep.
         Returns the wrench that was applied.
         
@@ -869,7 +915,7 @@ class Aliengo:
         return wrench
 
 
-    def apply_foot_disturbance(self, force=None, foot=None, max_force_mag=25): # TODO took 1e2 off mags
+    def apply_foot_disturbance(self, force=None, foot=None, max_force_mag=2500 * 0): 
         '''Applies a given force to a given foot, or defaults to random force applied to random foot. Only lasts for 
         one timestep. Returns force and foot applied to. 
         
@@ -979,7 +1025,7 @@ class Aliengo:
         return relative_z_heights.reshape((grid_len, grid_len))
 
 
-    def _is_non_foot_ground_contact(self): 
+    def is_non_foot_ground_contact(self): 
         """Detect if any parts of the robot, other than the feet, are touching the ground. Returns number of non-foot
         contacts."""
 
@@ -1056,7 +1102,8 @@ class Aliengo:
             positionGains=self.kp * np.ones(self.n_motors),
             velocityGains=self.kd * np.ones(self.n_motors))
         
-        self.last_true_joint_position_targets = positions
+        self.true_joint_position_target_history.pop()
+        self.true_joint_position_target_history.insert(0, positions)
 
 
     def _positions_to_actions(self, positions):
@@ -1180,12 +1227,12 @@ class Aliengo:
 
 
 
-        self.foot_target_history = [self._get_foot_frame_foot_positions()] * 3
+        self.foot_target_history = [self.get_foot_frame_foot_positions()] * 3
         self.phases = np.array([0, np.pi, np.pi, 0])
         self.f_i = np.zeros(4)
         self.joint_pos_error_history = [np.zeros(12)] * 3 
         self.joint_velocity_history = [np.zeros(12)] * 3
-        self.last_true_joint_position_targets = positions
+        self.true_joint_position_target_history = [positions] * 3
         return self.foot_target_history[0]
 
 
@@ -1264,7 +1311,7 @@ def calculate_tracking_error(commanded_foot_positions, client, quadruped):
         # actual_pos = np.array([i[0] for i in client.getLinkStates(quadruped.quadruped, quadruped.foot_links)])
 
 
-    errors = abs(commanded_foot_positions - quadruped._get_foot_frame_foot_positions())
+    errors = abs(commanded_foot_positions - quadruped.get_foot_frame_foot_positions())
     print('Maximum tracking error: {:e}'.format(errors.max()))
     print('Mean tracking error: {:e}'.format(errors.mean()))
     # print(commanded_global_foot_positions - actual_pos)
@@ -1306,7 +1353,7 @@ def axes_shift_function_test(client, quadruped):
     test_points = (np.random.random_sample((n, 4, 3)) - 0.5) * 20 # distributed U[-10, 10)
     error = np.zeros(n)
     for i in range(n): # loop bc these methods are not vectorized
-        output = quadruped._foot_frame_pos_to_global(quadruped._get_foot_frame_foot_positions(
+        output = quadruped._foot_frame_pos_to_global(quadruped.get_foot_frame_foot_positions(
                                                                                             global_pos=test_points[i]))
         error[i] = abs(output - test_points[i]).mean()
     print('\n' + '#' * 50)
@@ -1315,7 +1362,7 @@ def axes_shift_function_test(client, quadruped):
 
     error = np.zeros(n)
     for i in range(n): # loop bc these methods are not vectorized
-        output = quadruped._get_foot_frame_foot_positions(
+        output = quadruped.get_foot_frame_foot_positions(
                                                         global_pos=quadruped._foot_frame_pos_to_global(test_points[i]))
         error[i] = abs(output - test_points[i]).mean()
     print('Avg Error Other way: {}'.format(error.mean()))
@@ -1353,12 +1400,12 @@ def test_disturbances(client, quadruped):
 
 def test_calf_joint_torques(client, quadruped):
     # quadruped.reset_joint_positions(stochastic=False)
-    quadruped.foot_target_history = [quadruped._get_foot_frame_foot_positions()] * 3
+    quadruped.foot_target_history = [quadruped.get_foot_frame_foot_positions()] * 3
     quadruped.phases = np.array([0, np.pi, np.pi, 0])
     quadruped.f_i = np.zeros(4)
     quadruped.joint_pos_error_history = [np.zeros(12)] * 3 
     quadruped.joint_velocity_history = [np.zeros(12)] * 3
-    quadruped.last_true_joint_position_targets = np.zeros(12)
+    quadruped.last_true_joint_position_targets = np.zeros(12) #TODO
 
 
     hip_offset_from_base = client.getJointInfo(quadruped.quadruped, quadruped.hip_joints[0])[14] #TODO just store this value
