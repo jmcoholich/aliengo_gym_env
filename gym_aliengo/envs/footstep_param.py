@@ -20,7 +20,7 @@ then later I can train it based on the success of a well-trained quadruped agent
 
 
 Train this agent with 
-main.py --env-name gym_aliengo:FootstepParam-v0 --wandb-project FootstepParam-v0 --recurrent-policy --num-processes 40 --num-steps 300 --seed <seed> --entropy-coef 0.02 --gpu-idx <number>
+main.py --env-name gym_aliengo:FootstepParam-v0 --wandb-project FootstepParam-v0 --recurrent-policy --num-processes 40 --num-steps 300 --seed 3051466742 --entropy-coef 0.02 --gpu-idx 2
 
 
 Termination: same as parent
@@ -66,9 +66,9 @@ class FootstepParam(aliengo_env.AliengoEnv):
         ''' This is just a straight path on flat ground for now '''
         
         self.footsteps = np.zeros((4, 3)) # each footstep is an x and y position
-        step_len = 0.15 
-        width = 0.25
-        length = 0.45
+        step_len = 0.15 + (np.random.random_sample() - 0.5) * 0.02
+        width = 0.25 + (np.random.random_sample() - 0.5) * 0.01
+        length = 0.45 
         len_offset = -0.02
         self.footsteps[0] = np.array([-length/2.0 + len_offset + step_len, -width/2.0, 0]) # RR
         self.footsteps[1] = np.array([length/2.0 + len_offset + step_len, -width/2.0, 0]) # FR
@@ -100,10 +100,11 @@ class FootstepParam(aliengo_env.AliengoEnv):
             assert False
 
         # get foot positions
-        global_pos = self.client.getLinkState(self.quadruped, self.foot_links[foot])[0]
+        return self.client.getLinkState(self.quadruped.quadruped, self.quadruped.foot_links[foot])[0]
+
 
     
-    def footstep_reward(self):
+    def footstep_rew(self):
         
         tol = 0.03 # in meters
         # find current foot
@@ -124,7 +125,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         '''Get rid of rewards for fwd motion.'''
         
         # speed_treshold = 0.5 # m/s
-        base_vel, base_avel = self.client.getBaseVelocity(self.quadruped)
+        base_vel, base_avel = self.client.getBaseVelocity(self.quadruped.quadruped)
         # lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
         #                                                                         if base_vel[0] < speed_treshold else 1.0
 
@@ -137,13 +138,13 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
         # foot_clearance_rew = self._foot_clearance_rew()
 
-        body_collision_rew = -(self.is_non_foot_ground_contact() + self.self_collision())
+        body_collision_rew = -(self.quadruped.is_non_foot_ground_contact() + self.quadruped.self_collision())
 
-        target_smoothness_rew = - np.linalg.norm(self.true_joint_position_target_history[0] \
-                                                - 2 * self.true_joint_position_target_history[1] + \
-                                                self.true_joint_position_target_history[2])
+        target_smoothness_rew = - np.linalg.norm(self.quadruped.true_joint_position_target_history[0] \
+                                                - 2 * self.quadruped.true_joint_position_target_history[1] + \
+                                                self.quadruped.true_joint_position_target_history[2])
 
-        torque_rew = -np.linalg.norm(self.applied_torques, 1)
+        torque_rew = -np.linalg.norm(self.quadruped.applied_torques, 1)
 
         footstep_rew = self.footstep_rew()
 
@@ -162,7 +163,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
                     'foostep_rew':footstep_rew}
 
         # other stuff to track
-        rew_dict['x_vel'] = self.base_vel[0]
+        rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
                     + 2e-5 * torque_rew + 1.0 * footstep_rew
@@ -211,9 +212,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         # elif self.env_mode == 'flat':
         #     obs = self.quadruped.get_observation()
         # else: assert False
-        obs = np.concatenate((self.quadruped.footstep_param_obs(), 
-                            self.current_footstep%4, 
-                            self.get_current_foot_global_pos - self.footsteps[self.current_footstep]))
+        obs = self.get_obs()
 
         info = {}
         done, termination_dict = self._is_state_terminal() # this must come after self._update_state()
@@ -234,6 +233,42 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
         return obs, rew, done, info
 
+
+    def reset(self, base_height=0.48, stochastic=True): 
+        '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
+        prevent the robot from jumping/falling on first user command. '''
+
+        self.eps_step_counter = 0
+        self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
+                                            posObj=[0,0,base_height], 
+                                            ornObj=[0,0,0,1.0]) 
+
+        self.quadruped.reset_joint_positions(stochastic=stochastic) 
+        for i in range(500): # to let the robot settle on the ground.
+            self.client.stepSimulation()
+        self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client, update_priv_info=False)
+        # if self.env_mode == 'pmtg':
+        #     self.t = 0.0
+        #     obs = self.quadruped.get_pmtg_observation()
+        # elif self.env_mode == 'hutter_pmtg':
+        #     self.t = 0.0
+        #     obs = self.quadruped.get_hutter_pmtg_observation()
+        # elif self.env_mode == 'hutter_teacher_pmtg':
+        #     self.t = 0.0
+        #     obs = self.quadruped.get_hutter_teacher_pmtg_observation()
+        # elif self.env_mode == 'flat':
+        #     obs = self.quadruped.get_observation()
+        # else: assert False
+        obs = self.get_obs()
+
+        return obs
+
+
+    def get_obs(self):
+        obs = np.concatenate((self.quadruped.footstep_param_obs(), 
+                            np.array([self.current_footstep%4]), 
+                            self.get_current_foot_global_pos() - self.footsteps[self.current_footstep]))
+        return obs
     
 
 if __name__ == '__main__':
