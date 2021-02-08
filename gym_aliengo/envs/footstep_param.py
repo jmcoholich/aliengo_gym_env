@@ -80,7 +80,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         #     self.footsteps[i*4: (i+1)*4, 0] += i * 2 * step_len 
         
         if np.random.random_sample() > 0.5: # swap which rear foot goes first, so agent doesn't memorize first foot.
-            idx = np.arange(self.num_footstep_cycles * 4) * 2
+            idx = np.arange(self.num_footstep_cycles * 2) * 2
             self.footsteps[np.concatenate((idx, idx + 1))] = self.footsteps[np.concatenate((idx + 1, idx))]
         if self.vis:
             self.client.resetBasePositionAndOrientation(self.foot_step_marker,
