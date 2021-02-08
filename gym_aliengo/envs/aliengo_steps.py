@@ -31,7 +31,7 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
         self.row_width = 1.0/rows_per_m
         self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
         self.terrain_length = 20  #TODO make this parameter scale with reward because terrain generation takes a lot of time 
-        self.terrain_width = 3 
+        self.terrain_width = 10 #TODO 
         self.terrain_height = terrain_height_range/2.0 + 0.01 # this is just the mean height of the blocks
 
         self.block_length_range = self.row_width/2. # the mean is set to the same as row_width. 
@@ -97,7 +97,8 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
                                 height_ub=0.8 + self.terrain_height_range + 0.01) 
         timeout = (self.eps_step_counter >= self.eps_timeout) or \
                     (self.quadruped.base_position[0] >= self.terrain_length - 1.0)
-        y_out_of_bounds = not (-self.terrain_width/2. < self.quadruped.base_position[1] < self.terrain_width/2.)
+        y_out_of_bounds = not (-self.terrain_width/2. + 0.25 < self.quadruped.base_position[1] < \
+                                                                                        self.terrain_width/2. - 0.25)
 
         if timeout:
             termination_dict['TimeLimit.truncated'] = True

@@ -29,12 +29,13 @@ Termination: same as parent
 
 class FootstepParam(aliengo_env.AliengoEnv):
 
-    def __init__(self, **kwargs):        
+    def __init__(self, num_footstep_cycles=10, **kwargs):        
         super().__init__(**kwargs)
         if self.vis:
             self._init_vis()
 
         self.current_footstep = 0
+        self.num_footstep_cycles = num_footstep_cycles
         self.generate_footstep_locations()
 
         self.action_lb, self.action_ub = self.quadruped.footstep_param_action_bounds()
@@ -50,8 +51,6 @@ class FootstepParam(aliengo_env.AliengoEnv):
             high=observation_ub,
             dtype=np.float32
             )
-
-
 
 
     def _init_vis(self):
@@ -75,30 +74,36 @@ class FootstepParam(aliengo_env.AliengoEnv):
         self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # RL
         self.footsteps[3] = np.array([length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # FL
         
-        n_cycles = 5
-
-        self.footsteps = np.tile(self.footsteps, (n_cycles, 1))
-        for i in range(n_cycles):
-            self.footsteps[i*4: (i+1)*4, 0] += i * 2 * step_len 
+        self.footsteps = np.tile(self.footsteps, (self.num_footstep_cycles, 1))
+        self.footsteps[:, 0] += np.arange(self.num_footstep_cycles * 2).repeat(2) * step_len
+        # for i in range(self.num_footstep_cycles):
+        #     self.footsteps[i*4: (i+1)*4, 0] += i * 2 * step_len 
         
+        if np.random.random_sample() > 0.5: # swap which rear foot goes first, so agent doesn't memorize first foot.
+            idx = np.arange(self.num_footstep_cycles * 4) * 2
+            self.footsteps[np.concatenate((idx, idx + 1))] = self.footsteps[np.concatenate((idx + 1, idx))]
         if self.vis:
             self.client.resetBasePositionAndOrientation(self.foot_step_marker,
                                                         self.footsteps[self.current_footstep], 
                                                         [0, 0, 0, 1])
 
 
-    def get_current_foot_global_pos(self):
+    def get_current_foot_idx(self):
         if self.current_footstep%4 == 0: # RR
-            foot = 2
+            return 2
         elif self.current_footstep%4 == 1: # FR
-            foot = 0
+            return 0
         elif self.current_footstep%4 == 2: # RL
-            foot = 3
+            return 3
         elif self.current_footstep%4 == 3: # FL
-            foot = 1
+            return 1
         else:
             assert False
 
+
+
+    def get_current_foot_global_pos(self):
+        foot = self.get_current_foot_idx()
         # get foot positions
         return self.client.getLinkState(self.quadruped.quadruped, self.quadruped.foot_links[foot])[0]
 
@@ -112,7 +117,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         global_pos = self.get_current_foot_global_pos()
 
         dist = np.linalg.norm(global_pos - self.footsteps[self.current_footstep])
-        if dist < tol: 
+        if (dist < tol) and (self.quadruped.get_foot_contacts()[self.get_current_foot_idx()] > 10.0): 
             self.current_footstep += 1
             rew = 1.0
         else:
@@ -166,7 +171,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
-                    + 2e-5 * torque_rew + 1.0 * footstep_rew
+                    + 2e-5 * torque_rew + 10.0 * footstep_rew
         return total_rew, rew_dict
 
 
@@ -239,6 +244,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         prevent the robot from jumping/falling on first user command. '''
 
         self.eps_step_counter = 0
+        self.generate_footstep_locations()
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,base_height], 
                                             ornObj=[0,0,0,1.0]) 
@@ -271,9 +277,24 @@ class FootstepParam(aliengo_env.AliengoEnv):
         return obs
     
 
+def render_all_footsteps(env):
+    for i in range(int(len(env.footsteps)/4)):
+        shape = env.client.createVisualShape(p.GEOM_CYLINDER, 
+                                            radius=.06, 
+                                            length=.001, 
+                                            rgbaColor=[*np.random.random_sample(3),0.95])
+        for j in range(4):
+            env.client.createMultiBody(baseVisualShapeIndex=shape, basePosition=env.footsteps[i*4 + j])
+            env.client.addUserDebugText(str(j), env.footsteps[i*4 + j])
+    while True:
+        time.sleep(10)
+
+ 
 if __name__ == '__main__':
     env = FootstepParam(render=True, vis=True, fixed=True)
     env.reset(stochastic=False)
+    render_all_footsteps(env)
+
     foot_positions = np.zeros((4, 3))
     lateral_offset = 0.11
     foot_positions[:,-1] = -0.4
