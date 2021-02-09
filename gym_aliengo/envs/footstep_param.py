@@ -133,8 +133,15 @@ class FootstepParam(aliengo_env.AliengoEnv):
         if (dist < tol) and (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
             self.current_footstep += 1
             rew = 1.0
+            if self.vis: print("#" * 100 + '\n' + 'footstep reached' + '\n' + '#' * 100)
         else:
             rew = -dist
+        
+        if self.vis:
+            print('Footstep rew: {:.2f}'.format(rew))
+            self.client.resetBasePositionAndOrientation(self.foot_step_marker,
+                                                        self.footsteps[self.current_footstep], 
+                                                        [0, 0, 0, 1])
         return rew
 
     
@@ -183,7 +190,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
-                    + 2e-5 * torque_rew + 10.0 * footstep_rew
+                    + 2e-5 * torque_rew + 1.0 * footstep_rew
 
         return total_rew, rew_dict
 
@@ -256,6 +263,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. '''
 
+        if self.vis: print('*' * 100 + '\n' + 'Resetting' + '\n' + '*' * 100)
         self.current_footstep = 0
         self.eps_step_counter = 0
         self.generate_footstep_locations()

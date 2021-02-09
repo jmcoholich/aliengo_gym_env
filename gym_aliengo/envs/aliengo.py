@@ -828,7 +828,7 @@ class Aliengo:
                 self.client.resetBasePositionAndOrientation(self.hip_ball_ids[i], 
                                                             posObj=hip_joint_positions[i], 
                                                             ornObj=[0,0,0,1])
-                print('{:.3f}, {:.3f}, {:.3f}, {:.3f}'.format(*self.f_i) + ' ' * 20, end='\r', flush=True)
+                # print('{:.3f}, {:.3f}, {:.3f}, {:.3f}'.format(*self.f_i) + ' ' * 20, end='\r', flush=True)
 
 
     def render(self, mode, client): 
