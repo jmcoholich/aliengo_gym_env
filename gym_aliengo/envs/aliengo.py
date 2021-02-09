@@ -197,7 +197,7 @@ class Aliengo:
 
     def footstep_param_action_bounds(self):
         lb = np.concatenate((np.array([-0.2, -0.2, -0.6] * 4),
-                            -np.ones(12) * 0.1))
+                            -np.ones(12) * 0.001))
         ub = np.concatenate((np.array([0.2, 0.2, -0.1] * 4),
                             np.ones(12) * 0.001))
         return lb, ub

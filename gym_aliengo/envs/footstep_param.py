@@ -29,7 +29,7 @@ Termination: same as parent
 
 class FootstepParam(aliengo_env.AliengoEnv):
 
-    def __init__(self, num_footstep_cycles=10, **kwargs):        
+    def __init__(self, num_footstep_cycles=2, **kwargs):        # TODO
         super().__init__(**kwargs)
         if self.vis:
             self._init_vis()
@@ -65,48 +65,61 @@ class FootstepParam(aliengo_env.AliengoEnv):
         ''' This is just a straight path on flat ground for now '''
         
         self.footsteps = np.zeros((4, 3)) # each footstep is an x and y position
-        step_len = 0.15 + (np.random.random_sample() - 0.5) * 0.02
+        step_len = 0.13 + (np.random.random_sample() - 0.5) * 0.02
+        # step_len = 1.0
         width = 0.25 + (np.random.random_sample() - 0.5) * 0.01
         length = 0.45 
         len_offset = -0.02
-        self.footsteps[0] = np.array([-length/2.0 + len_offset + step_len, -width/2.0, 0]) # RR
-        self.footsteps[1] = np.array([length/2.0 + len_offset + step_len, -width/2.0, 0]) # FR
-        self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # RL
-        self.footsteps[3] = np.array([length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # FL
+
+        if np.random.random_sample() > 0.5:
+            self.footstep_idcs = [2,0,3,1]
+            self.footsteps[0] = np.array([-length/2.0 + len_offset + step_len, -width/2.0, 0]) # RR
+            self.footsteps[1] = np.array([length/2.0 + len_offset +  step_len, -width/2.0, 0]) # FR
+            self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # RL
+            self.footsteps[3] = np.array([length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # FL
+        else:
+            self.footstep_idcs = [3,1,2,0]
+            self.footsteps[0] = np.array([-length/2.0 + len_offset + step_len, width/2.0, 0]) # RL
+            self.footsteps[1] = np.array([length/2.0 + len_offset +  step_len, width/2.0, 0]) # FL
+            self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 *  step_len, -width/2.0, 0]) # RR
+            self.footsteps[3] = np.array([length/2.0 + len_offset + 2 * step_len, -width/2.0, 0]) # FR
         
         self.footsteps = np.tile(self.footsteps, (self.num_footstep_cycles, 1))
-        self.footsteps[:, 0] += np.arange(self.num_footstep_cycles * 2).repeat(2) * step_len
+        self.footsteps[:, 0] += np.arange(self.num_footstep_cycles).repeat(4) * step_len * 2
         # for i in range(self.num_footstep_cycles):
         #     self.footsteps[i*4: (i+1)*4, 0] += i * 2 * step_len 
-        
-        if np.random.random_sample() > 0.5: # swap which rear foot goes first, so agent doesn't memorize first foot.
-            idx = np.arange(self.num_footstep_cycles * 2) * 2
-            self.footsteps[np.concatenate((idx, idx + 1))] = self.footsteps[np.concatenate((idx + 1, idx))]
+        # if np.random.random_sample() > 0.5: # swap which rear foot goes first, so agent doesn't memorize first foot.
+        # if True: # swap which rear foot goes first, so agent doesn't memorize first foot.
+        #     # idx = np.arange(self.num_footstep_cycles * 2) * 2
+        #     idx = np.arange(self.num_footstep_cycles * 2) + np.arange(self.num_footstep_cycles * 1).repeat(2) * 2
+        #     self.footsteps[np.concatenate((idx, idx + 2))] = self.footsteps[np.concatenate((idx + 2, idx))]
         if self.vis:
             self.client.resetBasePositionAndOrientation(self.foot_step_marker,
                                                         self.footsteps[self.current_footstep], 
                                                         [0, 0, 0, 1])
 
 
-    def get_current_foot_idx(self):
-        if self.current_footstep%4 == 0: # RR
-            return 2
-        elif self.current_footstep%4 == 1: # FR
-            return 0
-        elif self.current_footstep%4 == 2: # RL
-            return 3
-        elif self.current_footstep%4 == 3: # FL
-            return 1
-        else:
-            assert False
-
+    # def get_current_foot_idx(self):
+    #     if self.current_footstep%4 == 0: # RR
+    #         return 2
+    #     elif self.current_footstep%4 == 1: # FR
+    #         return 0
+    #     elif self.current_footstep%4 == 2: # RL
+    #         return 3
+    #     elif self.current_footstep%4 == 3: # FL
+    #         return 1
+    #     else:
+    #         assert False
 
 
     def get_current_foot_global_pos(self):
-        foot = self.get_current_foot_idx()
+        '''Returns position of the bottom of the foot.'''
+        # foot = self.get_current_foot_idx()
+        foot = self.footstep_idcs[self.current_footstep%4]
         # get foot positions
-        return self.client.getLinkState(self.quadruped.quadruped, self.quadruped.foot_links[foot])[0]
-
+        pos = np.array(self.client.getLinkState(self.quadruped.quadruped, self.quadruped.foot_links[foot])[0])
+        pos[2] -= 0.0265
+        return pos
 
     
     def footstep_rew(self):
@@ -117,13 +130,12 @@ class FootstepParam(aliengo_env.AliengoEnv):
         global_pos = self.get_current_foot_global_pos()
 
         dist = np.linalg.norm(global_pos - self.footsteps[self.current_footstep])
-        if (dist < tol) and (self.quadruped.get_foot_contacts()[self.get_current_foot_idx()] > 10.0): 
+        if (dist < tol) and (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
             self.current_footstep += 1
             rew = 1.0
         else:
             rew = -dist
         return rew
-
 
     
     def reward(self):
@@ -172,6 +184,8 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
                     + 2e-5 * torque_rew + 10.0 * footstep_rew
+
+        print(footstep_rew)
         return total_rew, rew_dict
 
 
@@ -243,6 +257,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. '''
 
+        self.current_footstep = 0
         self.eps_step_counter = 0
         self.generate_footstep_locations()
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
@@ -286,14 +301,18 @@ def render_all_footsteps(env):
         for j in range(4):
             env.client.createMultiBody(baseVisualShapeIndex=shape, basePosition=env.footsteps[i*4 + j])
             env.client.addUserDebugText(str(j), env.footsteps[i*4 + j])
-    while True:
-        time.sleep(10)
+    # while True:
+    #     time.sleep(10)
 
  
 if __name__ == '__main__':
-    env = FootstepParam(render=True, vis=True, fixed=True)
+    env = FootstepParam(render=True, vis=True, fixed=False)
     env.reset(stochastic=False)
     render_all_footsteps(env)
+    while True:
+        env.client.stepSimulation()
+        env.reward()
+        time.sleep(1/240. * 4)
 
     foot_positions = np.zeros((4, 3))
     lateral_offset = 0.11
