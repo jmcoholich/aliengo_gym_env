@@ -286,7 +286,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
     def get_obs(self):
         obs = np.concatenate((self.quadruped.footstep_param_obs(), 
-                            np.array([self.current_footstep%4]), 
+                            np.array([self.footstep_idcs[self.current_footstep%4]]), 
                             self.get_current_foot_global_pos() - self.footsteps[self.current_footstep]))
         return obs
     
