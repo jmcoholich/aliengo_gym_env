@@ -29,7 +29,7 @@ Termination: same as parent
 
 class FootstepParam(aliengo_env.AliengoEnv):
 
-    def __init__(self, num_footstep_cycles=2, **kwargs):        # TODO
+    def __init__(self, num_footstep_cycles=10, **kwargs):    
         super().__init__(**kwargs)
         if self.vis:
             self._init_vis()
@@ -185,7 +185,6 @@ class FootstepParam(aliengo_env.AliengoEnv):
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
                     + 2e-5 * torque_rew + 10.0 * footstep_rew
 
-        print(footstep_rew)
         return total_rew, rew_dict
 
 
