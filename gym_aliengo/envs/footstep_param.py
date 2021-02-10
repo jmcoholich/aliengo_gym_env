@@ -60,7 +60,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
     def _is_state_terminal(self): 
         done, termination_dict = super()._is_state_terminal()
         # end on penultimate footstep, to avoid indexing errors
-        reached_end = self.current_footstep == self.num_footstep_cycles * 4 - 2
+        reached_end = self.current_footstep == (self.num_footstep_cycles * 4 - 2)
         done = done or reached_end
         if reached_end: # this is effectively same as timeout, for reward purposes
             termination_dict['TimeLimit.truncated'] = True
