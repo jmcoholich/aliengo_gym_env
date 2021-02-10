@@ -174,11 +174,11 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
         if (curr_dist < tol) and (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
             self.current_footstep += 1
-            rew = 0.01
+            rew = 10.0
             if self.vis: print("#" * 100 + '\n' + 'footstep reached' + '\n' + '#' * 100)
             self.prev_dist = self.calc_curr_foostep_dist() # will return a different value, since current_footstep ++
         else:
-            rew = self.prev_dist - curr_dist
+            rew = (self.prev_dist - curr_dist)/ (1.0/240 * self.n_hold_frames)
             self.prev_dist = curr_dist
         
         if self.vis:
@@ -237,7 +237,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
-                    + 2e-5 * torque_rew + 1000.0 * footstep_vel_rew #0.1 * footstep_rew
+                    + 2e-5 * torque_rew + 1.0 * footstep_vel_rew #0.1 * footstep_rew
 
         return total_rew, rew_dict
 
