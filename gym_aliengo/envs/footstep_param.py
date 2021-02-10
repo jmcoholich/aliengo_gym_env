@@ -218,7 +218,6 @@ class FootstepParam(aliengo_env.AliengoEnv):
                     # 'foostep_rew':footstep_rew}
                     'foostep_vel_rew':footstep_vel_rew}
         
-        print(footstep_vel_rew)
 
         # other stuff to track
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
