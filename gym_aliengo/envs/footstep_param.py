@@ -301,7 +301,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
         if done:
             info['distance_traveled'] = self.quadruped.base_position[0]
-            info['footstep_reached'] = self.quadruped.current_footstep
+            info['footstep_reached'] = self.current_footstep
             info.update(self.mean_rew_dict)
 
         return obs, rew, done, info
