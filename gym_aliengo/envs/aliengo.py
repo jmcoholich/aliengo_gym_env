@@ -126,8 +126,6 @@ class Aliengo:
                                                             parentObjectUniqueId=self.quadruped,
                                                             lineWidth=self.line_width)
 
-        
-
     
     def get_hutter_teacher_pmtg_observation_bounds(self):
         # breakpoint()
@@ -196,13 +194,11 @@ class Aliengo:
 
 
     def footstep_param_action_bounds(self):
-        lb = np.concatenate((np.array([-0.2, -0.2, -0.6] * 4),
-                            -np.ones(12) * 0.001))
-        ub = np.concatenate((np.array([0.2, 0.2, -0.1] * 4),
-                            np.ones(12) * 0.001))
+        lb = np.concatenate((np.array([-0.25, -0.2, -0.55] * 4),
+                            -np.ones(12) * 0.1))
+        ub = np.concatenate((np.array([0.25, 0.2, -0.2] * 4),
+                            np.ones(12) * 0.1))
         return lb, ub
-
-
 
 
     def update_state(self, flat_ground, fake_client=None, update_priv_info=True):

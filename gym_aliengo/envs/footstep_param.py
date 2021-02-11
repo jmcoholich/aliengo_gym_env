@@ -33,7 +33,6 @@ class FootstepParam(aliengo_env.AliengoEnv):
         super().__init__(**kwargs)
 
         self.step_len = 0.13
-        self.step_len = 0.2
         
         if self.vis:
             self._init_vis()
@@ -71,7 +70,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         shape = self.client.createVisualShape(p.GEOM_CYLINDER, 
                                             radius=.06, 
                                             length=.001, 
-                                            rgbaColor=[191/255.,87./255,0,0.95])
+                                            rgbaColor=[191/255., 87/255., 0, 0.95])
         self.foot_step_marker = self.client.createMultiBody(baseVisualShapeIndex=shape)
 
 
@@ -88,15 +87,15 @@ class FootstepParam(aliengo_env.AliengoEnv):
         if np.random.random_sample() > 0.5:
             self.footstep_idcs = [2,0,3,1]
             self.footsteps[0] = np.array([-length/2.0 + len_offset + step_len, -width/2.0, 0]) # RR
-            self.footsteps[1] = np.array([length/2.0 + len_offset +  step_len, -width/2.0, 0]) # FR
+            self.footsteps[1] = np.array([length/2.0  + len_offset + step_len, -width/2.0, 0]) # FR
             self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # RL
-            self.footsteps[3] = np.array([length/2.0 + len_offset + 2 * step_len, width/2.0, 0]) # FL
+            self.footsteps[3] = np.array([length/2.0  + len_offset + 2 * step_len, width/2.0, 0]) # FL
         else:
             self.footstep_idcs = [3,1,2,0]
             self.footsteps[0] = np.array([-length/2.0 + len_offset + step_len, width/2.0, 0]) # RL
-            self.footsteps[1] = np.array([length/2.0 + len_offset +  step_len, width/2.0, 0]) # FL
-            self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 *  step_len, -width/2.0, 0]) # RR
-            self.footsteps[3] = np.array([length/2.0 + len_offset + 2 * step_len, -width/2.0, 0]) # FR
+            self.footsteps[1] = np.array([length/2.0  + len_offset + step_len, width/2.0, 0]) # FL
+            self.footsteps[2] = np.array([-length/2.0 + len_offset + 2 * step_len, -width/2.0, 0]) # RR
+            self.footsteps[3] = np.array([length/2.0  + len_offset + 2 * step_len, -width/2.0, 0]) # FR
         
         self.footsteps = np.tile(self.footsteps, (self.num_footstep_cycles, 1))
         self.footsteps[:, 0] += np.arange(self.num_footstep_cycles).repeat(4) * step_len * 2
@@ -127,10 +126,9 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
 
     def get_current_foot_global_pos(self):
-        '''Returns position of the bottom of the foot.'''
-        # foot = self.get_current_foot_idx()
+        """Returns position of the bottom of the foot."""
+
         foot = self.footstep_idcs[self.current_footstep%4]
-        # get foot positions
         pos = np.array(self.client.getLinkState(self.quadruped.quadruped, self.quadruped.foot_links[foot])[0])
         pos[2] -= 0.0265
         return pos
@@ -141,44 +139,44 @@ class FootstepParam(aliengo_env.AliengoEnv):
         return np.linalg.norm(global_pos - self.footsteps[self.current_footstep])
 
 
-    def footstep_rew(self):
+    # def footstep_rew(self):
         
-        tol = 0.03 # in meters
-        # find current foot
-        # FR, FL, RR, RL
+    #     tol = 0.03 # in meters
+    #     # find current foot
+    #     # FR, FL, RR, RL
 
-        dist = self.calc_curr_foostep_dist()
+    #     dist = self.calc_curr_foostep_dist()
 
-        if (dist < tol) and (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
-            self.current_footstep += 1
-            rew = 1.0
-            if self.vis: print("#" * 100 + '\n' + 'footstep reached' + '\n' + '#' * 100)
-        else:
-            rew = -dist
+    #     if (dist < tol) and (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
+    #         self.current_footstep += 1
+    #         rew = 1.0
+    #         if self.vis: print("#" * 100 + '\n' + 'footstep reached' + '\n' + '#' * 100)
+    #     else:
+    #         rew = -dist
         
-        if self.vis:
-            print('Footstep rew: {:.2f}'.format(rew))
-            self.client.resetBasePositionAndOrientation(self.foot_step_marker,
-                                                        self.footsteps[self.current_footstep], 
-                                                        [0, 0, 0, 1])
-        return rew
+    #     if self.vis:
+    #         print('Footstep rew: {:.2f}'.format(rew))
+    #         self.client.resetBasePositionAndOrientation(self.foot_step_marker,
+    #                                                     self.footsteps[self.current_footstep], 
+    #                                                     [0, 0, 0, 1])
+    #     return rew
 
 
     def footstep_vel_rew(self): 
         
         tol = 0.03 # in meters
-        # find current foot
-        # FR, FL, RR, RL
+        max_rewarded_speed = 1.0 # m/s
 
         curr_dist = self.calc_curr_foostep_dist()
 
-        if (curr_dist < tol) and (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
+        if (curr_dist < tol) and \
+                            (self.quadruped.get_foot_contacts()[self.footstep_idcs[self.current_footstep%4]] > 10.0): 
             self.current_footstep += 1
-            rew = 10.0
+            rew = 3.0
             if self.vis: print("#" * 100 + '\n' + 'footstep reached' + '\n' + '#' * 100)
             self.prev_dist = self.calc_curr_foostep_dist() # will return a different value, since current_footstep ++
         else:
-            rew = (self.prev_dist - curr_dist)/ (1.0/240 * self.n_hold_frames)
+            rew = np.clip((self.prev_dist - curr_dist)/ (1.0/240 * self.n_hold_frames), -np.inf, max_rewarded_speed)
             self.prev_dist = curr_dist
         
         if self.vis:
@@ -188,18 +186,19 @@ class FootstepParam(aliengo_env.AliengoEnv):
                                                         [0, 0, 0, 1])
         return rew
 
+
+    def footstep_stay_rew(self):
+        """Reward the foot opposite in cycle to be planted on the ground."""
+
+        contact = self.quadruped.get_foot_contacts()[self.footstep_idcs[(self.current_footstep + 2)%4]] > 10.0
+        return 1.0 * contact
+
+
     
     def reward(self):
         '''Get rid of rewards for fwd motion.'''
         
-        # speed_treshold = 0.5 # m/s
         base_vel, base_avel = self.client.getBaseVelocity(self.quadruped.quadruped)
-        # lin_vel_rew = np.exp(-2.0 * (base_vel[0] - speed_treshold) * (base_vel[0] - speed_treshold)) \
-        #                                                                         if base_vel[0] < speed_treshold else 1.0
-
-        # # give reward if we are pointed the right direction
-        # _, _, yaw = self.client.getEulerFromQuaternion(self.base_orientation)
-        # angular_rew = np.exp(-1.5 * abs(yaw)) # if yaw is zero this is one. 
 
         base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
                                             np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
@@ -216,6 +215,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
         # footstep_rew = self.footstep_rew()
         footstep_vel_rew = self.footstep_vel_rew()
+        footstep_stay_rew = self.footstep_stay_rew()
 
         # knee_force_rew = -np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[1,3,5]]]).sum()
         # knee_force_ratio_rew = np.abs(self.reaction_forces[[[2],[5],[8],[11]],[[0,2,4]]]).sum() /\
@@ -230,14 +230,15 @@ class FootstepParam(aliengo_env.AliengoEnv):
                     'target_smoothness_rew':target_smoothness_rew,
                     'torque_rew':torque_rew,
                     # 'foostep_rew':footstep_rew}
-                    'foostep_vel_rew':footstep_vel_rew}
+                    'foostep_vel_rew':footstep_vel_rew,
+                    'footstep_stay_rew':footstep_stay_rew}
         
 
         # other stuff to track
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
-                    + 2e-5 * torque_rew + 1.0 * footstep_vel_rew #0.1 * footstep_rew
+                    + 2e-5 * torque_rew + 1.0 * footstep_vel_rew + 0.5 * footstep_stay_rew #0.1 * footstep_rew
 
         return total_rew, rew_dict
 
@@ -247,27 +248,8 @@ class FootstepParam(aliengo_env.AliengoEnv):
         if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
-
-        # if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
-        #     # f = action[:4]
-        #     f = np.tile(action[0], 4) #TODO decide whether or not to keep this
-        #     residuals = action[4:].reshape((4,3))
-        #     self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
-        #     self.t += 1./240. * self.n_hold_frames
-        # elif self.env_mode == 'flat':
-        #     self.quadruped.set_joint_position_targets(action)
-        # else: raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg', or 'flat'. "
-        #                                                                     "Value {} was given.".format(self.env_mode))
+        
         self.quadruped.footstep_param_action(action)
-
-        # if (np.random.rand() < self.perturb_p) and self.apply_perturb: 
-        #     '''TODO eventually make disturbance generating function that applies disturbances for multiple timesteps'''
-        #     if np.random.rand() > 0.5:
-        #         # TODO returned values will be part of privledged information for teacher training
-        #         force, foot = self.quadruped.apply_foot_disturbance() 
-        #     else:
-        #         # TODO returned values will be part of privledged information for teacher training
-        #         wrench = self.quadruped.apply_torso_disturbance()
 
         for _ in range(self.n_hold_frames): 
             self.client.stepSimulation()
@@ -275,27 +257,12 @@ class FootstepParam(aliengo_env.AliengoEnv):
         self.eps_step_counter += 1
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client, update_priv_info=False)
 
-        # if self.env_mode == 'pmtg':
-        #     obs = self.quadruped.get_pmtg_observation()
-        # elif self.env_mode == 'hutter_pmtg':
-        #     obs = self.quadruped.get_hutter_pmtg_observation()
-        # elif self.env_mode == 'hutter_teacher_pmtg':
-        #     obs = self.quadruped.get_hutter_teacher_pmtg_observation()
-        # elif self.env_mode == 'flat':
-        #     obs = self.quadruped.get_observation()
-        # else: assert False
         obs = self.get_obs()
 
         info = {}
         done, termination_dict = self._is_state_terminal() # this must come after self._update_state()
         info.update(termination_dict) # termination_dict is an empty dict if not done
 
-        # if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg']:
-        #     rew, rew_dict = self.quadruped.pmtg_reward()
-        # elif self.env_mode == 'flat':
-        #     raise NotImplementedError
-        #     # rew, rew_dict = self.quadruped.reward()
-        # else: assert False
         rew, rew_dict = self.reward()
         self.update_mean_rew_dict(rew_dict)
 
@@ -314,7 +281,6 @@ class FootstepParam(aliengo_env.AliengoEnv):
         if self.vis: print('*' * 100 + '\n' + 'Resetting' + '\n' + '*' * 100)
         self.current_footstep = 0
         self.eps_step_counter = 0
-        self.prev_dist = self.calc_curr_foostep_dist()
         self.generate_footstep_locations()
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
                                             posObj=[0,0,base_height], 
@@ -324,18 +290,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         for i in range(500): # to let the robot settle on the ground.
             self.client.stepSimulation()
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client, update_priv_info=False)
-        # if self.env_mode == 'pmtg':
-        #     self.t = 0.0
-        #     obs = self.quadruped.get_pmtg_observation()
-        # elif self.env_mode == 'hutter_pmtg':
-        #     self.t = 0.0
-        #     obs = self.quadruped.get_hutter_pmtg_observation()
-        # elif self.env_mode == 'hutter_teacher_pmtg':
-        #     self.t = 0.0
-        #     obs = self.quadruped.get_hutter_teacher_pmtg_observation()
-        # elif self.env_mode == 'flat':
-        #     obs = self.quadruped.get_observation()
-        # else: assert False
+        self.prev_dist = self.calc_curr_foostep_dist()
         obs = self.get_obs()
 
         return obs
@@ -362,7 +317,7 @@ def render_all_footsteps(env):
 
  
 if __name__ == '__main__':
-    env = FootstepParam(render=True, vis=True, fixed=False)
+    env = FootstepParam(render=True, vis=True, fixed=True)
     env.reset(stochastic=False)
     render_all_footsteps(env)
     while True:
@@ -370,18 +325,18 @@ if __name__ == '__main__':
         env.reward()
         time.sleep(1/240. * 4)
 
-    foot_positions = np.zeros((4, 3))
-    lateral_offset = 0.11
-    foot_positions[:,-1] = -0.4
-    foot_positions[[0,2], 1] = -lateral_offset
-    foot_positions[[1,3], 1] = lateral_offset
-    action =  np.concatenate((foot_positions.flatten(), 
-                        np.zeros(12)))# first 12 is footstep xyz position, last 12 is added joint positions
-                        # env.quadruped._positions_to_actions(np.zeros(12))))# first 12 is footstep xyz position, last 12 is added joint positions
-    # action = env.action_space.high
-    # action[12:] = 0.0
-    while True:
-        env.step(action)
-        # env.quadruped.set_foot_positions(foot_positions)
-        # env.client.stepSimulation()
-        time.sleep(1/240.0 * 4)
+    # foot_positions = np.zeros((4, 3))
+    # lateral_offset = 0.11
+    # foot_positions[:,-1] = -0.4
+    # foot_positions[[0,2], 1] = -lateral_offset
+    # foot_positions[[1,3], 1] = lateral_offset
+    # action =  np.concatenate((foot_positions.flatten(), 
+    #                     np.zeros(12)))# first 12 is footstep xyz position, last 12 is added joint positions
+    #                     # env.quadruped._positions_to_actions(np.zeros(12))))# first 12 is footstep xyz position, last 12 is added joint positions
+    # # action = env.action_space.high
+    # # action[12:] = 0.0
+    # while True:
+    #     env.step(action)
+    #     # env.quadruped.set_foot_positions(foot_positions)
+    #     # env.client.stepSimulation()
+    #     time.sleep(1/240.0 * 4)
