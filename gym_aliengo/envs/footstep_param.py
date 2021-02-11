@@ -203,7 +203,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
                                             np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
 
-        roll, pitch, yaw = self.client.getEulerFromQuaternion(self.base_orientation)
+        roll, pitch, yaw = self.client.getEulerFromQuaternion(self.quadruped.base_orientation)
         base_orientation_rew = np.exp(-1.5 * (roll * roll + pitch * pitch))
 
         # foot_clearance_rew = self._foot_clearance_rew()
