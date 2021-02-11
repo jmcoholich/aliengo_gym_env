@@ -57,7 +57,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
 
 
     def _is_state_terminal(self): 
-        done, termination_dict = super()._is_state_terminal()
+        done, termination_dict = super()._is_state_terminal(flipping_bounds=[np.pi/4., np.pi/4., np.pi/4.])
         # end on penultimate footstep, to avoid indexing errors
         reached_end = self.current_footstep == (self.num_footstep_cycles * 4 - 2)
         done = done or reached_end
@@ -203,6 +203,9 @@ class FootstepParam(aliengo_env.AliengoEnv):
         base_motion_rew = np.exp(-1.5 * (base_vel[1] * base_vel[1])) + \
                                             np.exp(-1.5 * (base_avel[0] * base_avel[0] + base_avel[1] * base_avel[1]))
 
+        roll, pitch, yaw = self.client.getEulerFromQuaternion(self.base_orientation)
+        base_orientation_rew = np.exp(-1.5 * (roll * roll + pitch * pitch))
+
         # foot_clearance_rew = self._foot_clearance_rew()
 
         body_collision_rew = -(self.quadruped.is_non_foot_ground_contact() + self.quadruped.self_collision())
@@ -231,14 +234,16 @@ class FootstepParam(aliengo_env.AliengoEnv):
                     'torque_rew':torque_rew,
                     # 'foostep_rew':footstep_rew}
                     'foostep_vel_rew':footstep_vel_rew,
-                    'footstep_stay_rew':footstep_stay_rew}
+                    'footstep_stay_rew':footstep_stay_rew,
+                    'base_orientation_rew':base_orientation_rew}
         
 
         # other stuff to track
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
-                    + 2e-5 * torque_rew + 1.0 * footstep_vel_rew + 0.5 * footstep_stay_rew #0.1 * footstep_rew
+                    + 2e-5 * torque_rew + 1.0 * footstep_vel_rew + 0.5 * footstep_stay_rew + 0.5 * base_orientation_rew
+                    #0.1 * footstep_rew
 
         return total_rew, rew_dict
 

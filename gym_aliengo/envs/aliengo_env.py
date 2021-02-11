@@ -223,8 +223,10 @@ class AliengoEnv(gym.Env):
         pass
 
 
-    def _is_state_terminal(self):
-        quadruped_done, termination_dict = self.quadruped.is_state_terminal()
+    def _is_state_terminal(self, flipping_bounds=[np.pi/2., np.pi/4., np.pi/4.], height_lb=0.23, height_ub=0.8):
+        quadruped_done, termination_dict = self.quadruped.is_state_terminal(flipping_bounds=flipping_bounds,
+                                                                            height_lb=height_lb,
+                                                                            height_ub=height_ub)
         timeout = (self.eps_step_counter >= self.eps_timeout) 
         if timeout:
             termination_dict['TimeLimit.truncated'] = True

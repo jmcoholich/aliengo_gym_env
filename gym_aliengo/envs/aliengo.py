@@ -101,7 +101,7 @@ class Aliengo:
         self.foot_text = [0] * self.num_foot_terrain_scan_points * 4
         for i in range(self.num_foot_terrain_scan_points * 4):
             self.foot_scan_balls[i] = self.client.createMultiBody(baseVisualShapeIndex=small_ball)
-            self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
+            # self.foot_text[i] = self.client.addUserDebugText('init', textPosition=[0,0,0], textColorRGB=[0]*3)
         # self.client.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME,1)
         # self.client.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 0)
         # self.client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
@@ -112,19 +112,19 @@ class Aliengo:
         self.line_length = 0.25
         self.line_ids = [[0]*3]*4
         self.line_width = 5
-        for i in range(4):
-            self.line_ids[i][0] = self.client.addUserDebugLine([0,0,0], [self.line_length,0,0], lineColorRGB=[1,0,0], 
-                                                            parentLinkIndex=self.thigh_links[i],
-                                                            parentObjectUniqueId=self.quadruped,
-                                                            lineWidth=self.line_width)
-            self.line_ids[i][1] = self.client.addUserDebugLine([0,0,0], [0,self.line_length,0], lineColorRGB=[0,1,0], 
-                                                            parentLinkIndex=self.thigh_links[i],
-                                                            parentObjectUniqueId=self.quadruped,
-                                                            lineWidth=self.line_width)
-            self.line_ids[i][2] = self.client.addUserDebugLine([0,0,0], [0,0,self.line_length], lineColorRGB=[0,0,1], 
-                                                            parentLinkIndex=self.thigh_links[i],
-                                                            parentObjectUniqueId=self.quadruped,
-                                                            lineWidth=self.line_width)
+        # for i in range(4):
+        #     self.line_ids[i][0] = self.client.addUserDebugLine([0,0,0], [self.line_length,0,0], lineColorRGB=[1,0,0], 
+        #                                                     parentLinkIndex=self.thigh_links[i],
+        #                                                     parentObjectUniqueId=self.quadruped,
+        #                                                     lineWidth=self.line_width)
+        #     self.line_ids[i][1] = self.client.addUserDebugLine([0,0,0], [0,self.line_length,0], lineColorRGB=[0,1,0], 
+        #                                                     parentLinkIndex=self.thigh_links[i],
+        #                                                     parentObjectUniqueId=self.quadruped,
+        #                                                     lineWidth=self.line_width)
+        #     self.line_ids[i][2] = self.client.addUserDebugLine([0,0,0], [0,0,self.line_length], lineColorRGB=[0,0,1], 
+        #                                                     parentLinkIndex=self.thigh_links[i],
+        #                                                     parentObjectUniqueId=self.quadruped,
+        #                                                     lineWidth=self.line_width)
 
     
     def get_hutter_teacher_pmtg_observation_bounds(self):
@@ -802,8 +802,8 @@ class Aliengo:
             # balls are same radius as foot collision sphere
             commanded_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.0265, rgbaColor=[0, 100, 0, 1.0])
             actual_ball = self.client.createVisualShape(p.GEOM_SPHERE, radius=0.0265, rgbaColor=[255, 0, 0, 1.0])
-            for i in range(self.num_links):
-                self.client.changeVisualShape(self.quadruped, i, rgbaColor=[0, 0, 0, 0.75])
+            # for i in range(self.num_links):
+            #     self.client.changeVisualShape(self.quadruped, i, rgbaColor=[0, 0, 0, 0.75])
             # visualize commanded foot positions 
             self.foot_ball_ids = [0]*4
             self.hip_ball_ids = [0]*4
@@ -1236,21 +1236,21 @@ class Aliengo:
 
 
             
-    def _vis_coordinate_system(self):
-        self.line_length = 0.25
-        for i in range(4):
-            self.client.addUserDebugLine([0,0,0], [self.line_length,0,0], lineColorRGB=[1,0,0], 
-                                        parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][0],
-                                        parentObjectUniqueId=self.quadruped,
-                                        lineWidth=self.line_width)
-            self.client.addUserDebugLine([0,0,0], [0,self.line_length,0], lineColorRGB=[0,1,0], 
-                                        parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][1],
-                                        parentObjectUniqueId=self.quadruped,
-                                        lineWidth=self.line_width)
-            self.client.addUserDebugLine([0,0,0], [0,0,self.line_length], lineColorRGB=[0,0,1], 
-                                        parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][2],
-                                        parentObjectUniqueId=self.quadruped,
-                                        lineWidth=self.line_width)
+    # def _vis_coordinate_system(self):
+    #     self.line_length = 0.25
+    #     for i in range(4):
+    #         self.client.addUserDebugLine([0,0,0], [self.line_length,0,0], lineColorRGB=[1,0,0], 
+    #                                     parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][0],
+    #                                     parentObjectUniqueId=self.quadruped,
+    #                                     lineWidth=self.line_width)
+    #         self.client.addUserDebugLine([0,0,0], [0,self.line_length,0], lineColorRGB=[0,1,0], 
+    #                                     parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][1],
+    #                                     parentObjectUniqueId=self.quadruped,
+    #                                     lineWidth=self.line_width)
+    #         self.client.addUserDebugLine([0,0,0], [0,0,self.line_length], lineColorRGB=[0,0,1], 
+    #                                     parentLinkIndex=self.thigh_links[i], replaceItemUniqueId=self.line_ids[i][2],
+    #                                     parentObjectUniqueId=self.quadruped,
+    #                                     lineWidth=self.line_width)
 
 
 def sine_tracking_test(client, quadruped):
