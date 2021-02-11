@@ -250,6 +250,14 @@ class FootstepParam(aliengo_env.AliengoEnv):
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
         
         self.quadruped.footstep_param_action(action)
+        rand = np.random.random_sample()
+        p = 0.005
+        if rand < p:
+            if rand < p / 2.0: 
+                self.quadruped.apply_foot_disturbance(self, force=None, foot=None, max_force_mag=2500 * 0.1)
+            else:
+                self.quadruped.apply_torso_disturbance(self, wrench=None, max_force_mag=5000 * 0.1, \
+                                                                                            max_torque_mag=500 * 0.1)
 
         for _ in range(self.n_hold_frames): 
             self.client.stepSimulation()
