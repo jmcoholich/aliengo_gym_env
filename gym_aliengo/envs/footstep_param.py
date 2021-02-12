@@ -242,7 +242,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
         rew_dict['x_vel'] = self.quadruped.base_vel[0]
 
         total_rew = 0.10 * base_motion_rew + 0.20 * body_collision_rew + 0.10 * target_smoothness_rew \
-                    + 2e-5 * torque_rew + 1.0 * footstep_vel_rew + 0.5 * footstep_stay_rew + 0.5 * base_orientation_rew
+                    + 2e-5 * torque_rew + 2.0 * footstep_vel_rew + 1.0 * footstep_stay_rew + 0.5 * base_orientation_rew
                     #0.1 * footstep_rew
 
         return total_rew, rew_dict
