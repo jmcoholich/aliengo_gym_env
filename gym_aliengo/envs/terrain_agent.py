@@ -32,19 +32,23 @@ def show_heat(name, img, ratio=4):
     cv2.imshow(name, heatmap)
 
 
-def create_costmap(fake_client, terrain_bounds, foot_pos, terrain_max_height=100, mesh_res=100):
+def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, vis=False):
     """
     terrain_bounds should be [x_lb, x_ub, y_lb, y_ub]. Assumes bounds are rectangular.
     mesh_res is points per m
     foot_pos is the position of the current foot on the terrain 
     """
 
-    x_lb, x_ub, y_lb, y_ub = terrain_bounds
+    foot_x, foot_y = foot_pos
+    x_lb = foot_x - 0.5
+    x_ub = foot_x + 1.0
+    y_lb = foot_y - 0.5
+    y_ub = foot_y + 0.5
+
     x_len = x_ub - x_lb
     y_len = y_ub - y_lb
     num_x = int(x_len * mesh_res + 1)
     num_y = int(y_len * mesh_res + 1)
-    foot_x, foot_y = foot_pos
 
     # conserve memory, this array can be quite large
     rays = np.zeros((num_x * num_y, 4)).astype('float16') 
@@ -69,17 +73,24 @@ def create_costmap(fake_client, terrain_bounds, foot_pos, terrain_max_height=100
     step_i = foot_i
     step_j = int(num_x * ((foot_x + step_len) - x_lb)/x_len)
     foot_filter[step_i, step_j] = 1.0
+    if vis: foot_placement_vis = foot_filter.copy()
+    # penalize distance from step_i, step_j
 
+    foot_filter = np.expand_dims((np.arange(foot_filter.shape[0]) - step_i) * \
+                    (np.arange(foot_filter.shape[0]) - step_i), 1) + \
+                    np.expand_dims((np.arange(foot_filter.shape[1]) - step_j) * \
+                    (np.arange(foot_filter.shape[1]) - step_j), 0)
 
+    if vis:
+        show('foot_filter', foot_filter)
 
-    show('foot_filter', foot_filter)
-
-    # breakpoint()
-    show('heights', heights_img)
-    # show('blur_abs_laplace', blur_abs_laplacian)
-    show_heat('blur_abs_laplace', blur_abs_laplacian)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        show('heights', heights_img)
+        show_heat('blur_abs_laplace', blur_abs_laplacian)
+        show_heat('foot_filter', foot_filter)
+        show('foot_placement_vis', foot_placement_vis)
+        show_heat('combined', norm(blur_abs_laplacian) + norm(foot_filter))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
   
 
@@ -88,28 +99,12 @@ if __name__ == '__main__':
     import gym
     np.random.seed(1)
     env = gym.make('gym_aliengo:AliengoSteps-v0', render=False)
-    # env = gym.make('gym_aliengo:AliengoHills-v0', render=True)
+    # env = gym.make('gym_aliengo:AliengoHills-v0', render=False)
     
-    # it is too much computation to do it over the entire terrain
-    # x_lb = -2.0
-    # x_ub = env.terrain_length + 1.0 
-    # y_lb = -env.terrain_width/2.0
-    # y_ub =  env.terrain_width/2.0
-
-
-    # x_lb = 5.0
-    # x_ub = 5.5 
-    # y_lb = -0.25
-    # y_ub = 0.25
-    # create_costmap(env.fake_client, [x_lb, x_ub, y_lb, y_ub])
-
-    x_lb = 4.5
-    x_ub = 6.0
-    y_lb = -0.5
-    y_ub = 0.5
-
-    foot_x = 5.0
+    foot_x = 5.1
     foot_y = 0.25
-    create_costmap(env.fake_client, [x_lb, x_ub, y_lb, y_ub], [foot_x, foot_y], mesh_res=50)
-
+    start = time.time()
+    create_costmap(env.fake_client, [foot_x, foot_y], mesh_res=50, vis=False)
+    end = time.time()
+    print(end-start)
 
