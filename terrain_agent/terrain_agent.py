@@ -44,6 +44,7 @@ def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, 
     x_ub = foot_x + 1.0
     y_lb = foot_y - 0.5
     y_ub = foot_y + 0.5
+    step_len = 0.2 
 
     x_len = x_ub - x_lb
     y_len = y_ub - y_lb
@@ -65,25 +66,21 @@ def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, 
 
     blur_abs_laplacian = cv2.GaussianBlur(abs_laplacian, ksize=(31,31), sigmaX=3)
 
-    foot_filter = np.zeros((num_y, num_x))
+    if vis: foot_filter = np.zeros((num_y, num_x))
     foot_i = int(num_y * (y_len - foot_y + y_lb)/y_len) # i indexes along the rows, which is the y axis of the terrain
     foot_j = int(num_x * (foot_x - x_lb)/x_len)
-    foot_filter[foot_i, foot_j] = 1.0
-    step_len = 0.2 # I want cost to be high, the higher we are from the step len
+    if vis: foot_filter[foot_i, foot_j] = 1.0
     step_i = foot_i
     step_j = int(num_x * ((foot_x + step_len) - x_lb)/x_len)
-    foot_filter[step_i, step_j] = 1.0
+    if vis: foot_filter[step_i, step_j] = 1.0
     if vis: foot_placement_vis = foot_filter.copy()
     # penalize distance from step_i, step_j
 
-    foot_filter = np.expand_dims((np.arange(foot_filter.shape[0]) - step_i) * \
-                    (np.arange(foot_filter.shape[0]) - step_i), 1) + \
-                    np.expand_dims((np.arange(foot_filter.shape[1]) - step_j) * \
-                    (np.arange(foot_filter.shape[1]) - step_j), 0)
+    foot_filter = np.expand_dims((np.arange(num_y) - step_i) * (np.arange(num_y) - step_i), 1) + \
+                    np.expand_dims((np.arange(num_x) - step_j) * (np.arange(num_x) - step_j), 0)
 
     if vis:
         show('foot_filter', foot_filter)
-
         show('heights', heights_img)
         show_heat('blur_abs_laplace', blur_abs_laplacian)
         show_heat('foot_filter', foot_filter)
@@ -91,8 +88,6 @@ def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, 
         show_heat('combined', norm(blur_abs_laplacian) + norm(foot_filter))
         cv2.waitKey(0)
         cv2.destroyAllWindows()
-
-  
 
 
 if __name__ == '__main__':

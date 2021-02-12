@@ -30,7 +30,8 @@ class Aliengo:
         self.client = pybullet_client
         self.n_motors = 12
         self.gait_type = gait_type
-
+        
+        # FR, FL, RR, RL
         self.foot_links = [5, 9, 13, 17]
         self.shin_links = [4, 8, 12, 16]
         self.thigh_links =  [3, 7, 11, 15]
