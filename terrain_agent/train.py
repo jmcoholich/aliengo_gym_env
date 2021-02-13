@@ -71,7 +71,7 @@ assert envs[i].terrain_width == 10
 
 # x = X_SPAN/2.0
 # y = Y_SPAN/2.0
-# pos = np.array([[x, -y, 0.], # TODO need to do a ray batch to check for the z heights of the mf. 
+# pos = np.array([[x, -y, 0.], 
 #                 [x, y, 0.],
 #                 [-x, -y, 0.],
 #                 [-x, y, 0.]])
