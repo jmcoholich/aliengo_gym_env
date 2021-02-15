@@ -30,7 +30,9 @@ class AliengoEnv(gym.Env):
                     flat_ground=True, # this is for getting terrain scan in privileged info for Aliengo 
                     realTime=False, # should never be True when training, only for visualzation or debugging MAYBE
                     vis=False,
-                    **aliengo_kwargs):
+                    fixed=False,
+                    fixed_position=[0,0,1.0], 
+                    fixed_orientation=[0,0,0]):
         # Environment Options
         self.env_mode = env_mode
         self.apply_perturb = apply_perturb
@@ -47,6 +49,9 @@ class AliengoEnv(gym.Env):
         self.kp = kp 
         self.kd = kd
         self.vis = vis
+        self.fixed = fixed
+        self.fixed_orientation = fixed_orientation
+        self.fixed_position = fixed_position
         if render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
         else:
@@ -61,7 +66,9 @@ class AliengoEnv(gym.Env):
                                             kp=kp, 
                                             kd=kd,
                                             vis=vis,
-                                            **aliengo_kwargs)
+                                            fixed=self.fixed,
+                                            fixed_orientation=self.fixed_orientation,
+                                            fixed_position=self.fixed_position)
         self.fake_client = None
         self.client.setGravity(0,0,-9.8)
         if self.realTime:

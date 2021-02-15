@@ -23,7 +23,7 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
                 rows_per_m=2.0, # range from [1.0 to 5.0] (easy to hard) default=2.0
                 terrain_height_range=0.25, # range from [0.0, 0.375] (easy to hard) default=0.25
                 **kwargs):
-        
+        print(kwargs)
         super().__init__(**kwargs)
         
         # Terrain parameters, all units in meters

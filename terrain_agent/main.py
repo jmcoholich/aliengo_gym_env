@@ -26,7 +26,9 @@ def main():
     for i in range(len(envs)):
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 5.0), 
-                        terrain_height_range=np.random.uniform(0, 0.375), render=False)
+                        terrain_height_range=np.random.uniform(0, 0.375), render=False,
+                        fixed=True,
+                        fixed_position=[-10,0,1.0])
     assert envs[i].terrain_length == 20  
     assert envs[i].terrain_width == 10 
 
@@ -46,24 +48,6 @@ def main():
     output, foot = rand_foosteps(x_positions, y_positions, envs)
 
 
-    # """Plot generated footsteps. Red is the nominal footsteps when standing still, black is generated footsteps."""
-    # idx = 0
-    # pos = output[idx]
-    # print('\n', foot[idx])
-    # for i in range(4):
-    #     plt.plot(pos[i, 0], pos[i, 1], 'ko')
-
-
-    # x = X_SPAN/2.0
-    # y = Y_SPAN/2.0
-    # pos = np.array([[x, -y, 0.], 
-    #                 [x, y, 0.],
-    #                 [-x, -y, 0.],
-    #                 [-x, y, 0.]])
-    # for i in range(4):
-    #     plt.plot(pos[i, 0], pos[i, 1], 'r*')
-    # plt.grid()
-    # plt.show()
 
 if __name__ == '__main__':
     main()

@@ -14,6 +14,7 @@ class AliengoEnvParent(aliengo_env.AliengoEnv):
         # Make flat ground as False (enable terrain scan) for envs that have terrain
         if not 'flat_ground' in kwargs:
             kwargs['flat_ground'] = False
+        print(kwargs)
 
         super().__init__(**kwargs)
 
