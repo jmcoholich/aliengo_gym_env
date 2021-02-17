@@ -5,7 +5,7 @@ import gym
 import time
 import os 
 import matplotlib.pyplot as plt
-from gen_footsteps import rand_footsteps
+from observation import get_observation
 
 
 N_ENVS = 2
@@ -30,24 +30,9 @@ def main():
     assert envs[i].terrain_width == 10 
 
 
-    # generate footstep placements in each environment
-    x_positions = np.linspace(0.0, envs[0].terrain_length - 1.0, NUM_X)
-    y_positions = np.linspace(-envs[0].terrain_width/2.0 + 0.5, envs[0].terrain_width/2.0 - 0.5, NUM_Y)
-    output, foot = rand_foosteps(x_positions, y_positions, envs)
+    output, foot = get_observation(NUM_X, NUM_Y, envs)
 
-    # get the heightmap around each x and y position. Heighmaps will go through CNN encoder, so store as 2D arrays
-    heightmap_params = {'length': 1.25, # assumes square #TODO allow rectangular
-                            'robot_position': 0.5, # distance of robot base origin from back edge of height map
-                            'grid_spacing': 0.125}
-    pts_per_env = NUM_X * NUM_Y
-    assert pts_per_env * N_ENVS == len(output)
-    heightmaps = np.zeros((pts_per_env * N_ENVS, self.heightmap_params['length']**2))
-    for i in range(N_ENVS):
-        for j in range(pts_per_env * i, pts_per_env * (i + 1)):
-            heightmaps[j] = envs[i].quadruped._get_heightmap(envs[i].fake_client, 
-                                                        ray_start_height=100, #TODO 
-                                                        base_position=[], #TODO
-                                                        heightmap_params=heightmap_params)
+    
             
 
 if __name__ == '__main__':

@@ -964,7 +964,7 @@ class Aliengo:
         return contacts 
 
 
-    def _get_heightmap(self, client, ray_start_height, base_position, heightmap_params):
+    def _get_heightmap(self, client, ray_start_height, base_position, heightmap_params, vis=False, vis_client=None):
         '''Debug flag enables printing of labeled coordinates and measured heights to rendered simulation. 
         Uses the "fake_client" simulation instance in order to avoid measuring the robot instead of terrain
         ray_start_height should be a value that is guranteed to be above any terrain we want to measure. 
@@ -976,13 +976,13 @@ class Aliengo:
         assert length % grid_spacing == 0
         grid_len = int(length/grid_spacing) + 1
 
-        debug = False
-        show_xy = False
+        # debug = True
+        # show_xy = False
 
-        if self._debug_ids != []: # remove the exiting debug items
-            for _id in self._debug_ids:
-                self.client.removeUserDebugItem(_id)
-            self._debug_ids = []
+        # if self._debug_ids != []: # remove the exiting debug items
+        #     for _id in self._debug_ids:
+        #         self.client.removeUserDebugItem(_id)
+        #     self._debug_ids = []
 
         base_x = base_position[0] 
         base_y = base_position[1]
@@ -1001,26 +1001,35 @@ class Aliengo:
         z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
         relative_z_heights = z_heights - base_z
 
-        if debug:
-            # #print xy coordinates of robot origin 
-            # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
-            #             textPosition=[base_x, base_y,ray_start_height+1],
-            #             textColorRGB=[0,0,0])
-            # self._debug_ids.append(_id)
+        if vis:
+            if vis_client is None: raise ValueError('Must pass vis_client to visualize results')
+            z_grid = z_heights.reshape((grid_len, grid_len))
+            vis_shp = vis_client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0., 0., 0., 1.])
             for i in range(grid_len):
                 for j in range(grid_len):
-                    if show_xy:
-                        text = '%.3f, %.3f, %.3f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j])
-                    else:
-                        text = '%.3f'%(z_heights.reshape((grid_len, grid_len))[i,j])
-                    _id = self.client.addUserDebugText(text=text,
-                                            textPosition=[coordinates[0,i,j], coordinates[1,i,j],ray_start_height+0.5],
-                                            textColorRGB=[0,0,0])
-                    self._debug_ids.append(_id)
-                    _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],ray_start_height+0.5],
-                                            [coordinates[0,i,j], coordinates[1,i,j], 0],
-                                            lineColorRGB=[0,0,0] )
-                    self._debug_ids.append(_id)
+                    vis_client.createMultiBody(baseVisualShapeIndex=vis_shp, 
+                                            basePosition=[coordinates[0,i,j], coordinates[1,i,j], z_grid[i,j]])
+
+        # if debug:
+        #     # #print xy coordinates of robot origin 
+        #     # _id = self.client.addUserDebugText(text='%.2f, %.2f'%(base_x, base_y),
+        #     #             textPosition=[base_x, base_y,ray_start_height+1],
+        #     #             textColorRGB=[0,0,0])
+        #     # self._debug_ids.append(_id)
+        #     for i in range(grid_len):
+        #         for j in range(grid_len):
+        #             # if show_xy:
+        #             #     text = '%.3f, %.3f, %.3f'%(coordinates[0,i,j], coordinates[1,i,j], z_heights.reshape((grid_len, grid_len))[i,j])
+        #             # else:
+        #             #     text = '%.3f'%(z_heights.reshape((grid_len, grid_len))[i,j])
+        #             # _id = self.client.addUserDebugText(text=text,
+        #             #                         textPosition=[coordinates[0,i,j], coordinates[1,i,j],ray_start_height+0.5],
+        #             #                         textColorRGB=[0,0,0])
+        #             self._debug_ids.append(_id)
+        #             _id = self.client.addUserDebugLine([coordinates[0,i,j], coordinates[1,i,j],ray_start_height+0.5],
+        #                                     [coordinates[0,i,j], coordinates[1,i,j], 0],
+        #                                     lineColorRGB=[0,0,0] )
+        #             self._debug_ids.append(_id)
 
         return relative_z_heights.reshape((grid_len, grid_len))
 
