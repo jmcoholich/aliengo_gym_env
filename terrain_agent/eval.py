@@ -9,26 +9,23 @@ from observation import get_observation
 from agent import TerrainAgent
 
 
-N_ENVS = 2
+N_ENVS = 1
 NUM_X = 4 # number of footstep placements along x direction, per env
 NUM_Y = 3 # number of footstep placements along y direction, per env
 # np.random.seed(1)
 
-
-# TODO: 
-
-def main():
+def eval_agent(agent, vis=False):
 
     # create several envs of varying difficulty
     envs = [''] * N_ENVS
     for i in range(len(envs)):
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 5.0), 
-                        terrain_height_range=np.random.uniform(0, 0.375), render=False,
+                        terrain_height_range=np.random.uniform(0, 0.375), render=True,
                         fixed=True,
-                        fixed_position=[-10,0,1.0])
-    assert envs[i].terrain_length == 20  
-    assert envs[i].terrain_width == 10 
+                        fixed_position=[-10,0,1.0],
+                        terrain_width=3.0,
+                        terrain_length=5.0)
 
     # initialize neural network
     agent = TerrainAgent()
@@ -38,37 +35,27 @@ def main():
                         'grid_spacing': 1.0/64.0}
 
     # generate all data in the beginning
-    foot_positions, foot, heightmaps, _, _ = get_observation(NUM_X, NUM_Y, envs, heightmap_params=heightmap_params)
+    foot_positions, foot, heightmaps, x_pos, y_pos = get_observation(NUM_X, NUM_Y, envs, 
+                                                                    heightmap_params=heightmap_params, vis=vis)
 
-    # train
-    # TODO normalize the inputs and outputs to the neural network. TODO make/plot the outputs of the nn as relative to the height of the torso.
-    # TODO check over the agent to make sure everything is correctly relative
-    # TODO use float 32 instead of float 64 for everything.
-    # TODO make sure the envs are freed from memory after I'm done generating data
-    # TODO add CUDA
     
     # fwd pass
     foot_positions = torch.from_numpy(foot_positions).type(torch.float32)
     foot = torch.from_numpy(foot).unsqueeze(1).type(torch.float32)
     heightmaps = torch.from_numpy(heightmaps).unsqueeze(1).type(torch.float32) # add channel dimension of 1
     output = agent(foot_positions, foot, heightmaps)
-    
-
+    output = output.detach().numpy()
+    if vis:
+        pred_foot_shp = envs[0].client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1., 1., 1., 1.])
+        for i in range(len(output)):
+            basePosition = [output[i,0] + x_pos[i], output[i,1] + y_pos[i], output[i,2]]
+            envs[0].client.createMultiBody(baseVisualShapeIndex=pred_foot_shp, basePosition=basePosition)
+        time.sleep(1e5)
 
 
     # backward pass   
 
 if __name__ == '__main__':
-    main()
-
-
-
-
-
-
-
-
-
-
+    eval_agent(None, vis=True)
 
 

@@ -6,7 +6,8 @@ import time
 import os 
 import matplotlib.pyplot as plt
 
-def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483, y_span=0.234, step_len=0.2, vis=False): 
+def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483, y_span=0.234, step_len=0.2, vis=False,
+                    heightmap_params=None): 
     if not (isinstance(num_x, int) and isinstance(num_y, int)): raise TypeError("num_x and num_y must be integers")
     if not (num_x > 0 and num_y > 0): raise ValueError("num_x and num_y must be positive")
 
@@ -65,14 +66,15 @@ def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483,
                                             rayToPositions=rayToPositions.reshape(num_x * num_y * 4, 3))
         assert len(raw) == num_x * num_y * 4
         output[start:end, :, 2] += np.array([raw[i][3][2] for i in range(len(raw))]).reshape((num_x * num_y, 4))
-    # return output, foot
 
     # Generate heightmap################################################################################################
 
     # get the heightmap around each x and y position. Heighmaps will go through CNN encoder, so store as 2D arrays
-    heightmap_params = {'length': 1.25, # assumes square #TODO allow rectangular
-                        'robot_position': 0.5, # distance of robot base origin from back edge of height map
-                        'grid_spacing': 0.0625}
+    if heightmap_params is None:
+        heightmap_params = {'length': 1.25, # assumes square #TODO allow rectangular
+                            'robot_position': 0.5, # distance of robot base origin from back edge of height map
+                            'grid_spacing': 0.0625}
+    # if vis: heightmap_params['grid_spacing'] = 0.25
     pts_per_env = num_x * num_y
     grid_len = int(heightmap_params['length']/heightmap_params['grid_spacing']) + 1
     assert pts_per_env * num_envs == len(output)
@@ -90,10 +92,31 @@ def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483,
                                                         heightmap_params=heightmap_params,
                                                         vis=vis,
                                                         vis_client=envs[i].client)
-    return output, foot, heightmaps, est_robot_base_height, x_pos, y_pos # last 3 are just for debugging TODO don't return them, since I will 
-    # vis in this function
 
-def vis_footsteps():
+    # visualization ####################################################################################################
+    if vis: # just create visual shapes in all envs. Doesn't take much time in non-rendered ones anyways.
+        # visualize foot position locations
+        assert len(output)%num_envs == 0
+        n = int(len(output)/num_envs)
+        for i in range(num_envs):
+            foot_shp = envs[i].client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1., 0., 0., 1.])
+            curr_foot_shp = envs[i].client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[0., 0., 1., 1.])
+            torso_shp = envs[i].client.createVisualShape(p.GEOM_SPHERE,
+                                                                    radius=0.04, rgbaColor=[0., 1., 0., 1.])
+            for j in range(i * n, (i+1) * n):
+                envs[i].client.createMultiBody(baseVisualShapeIndex=torso_shp, 
+                                                        basePosition=[x_pos[j], y_pos[j], est_robot_base_height[j]])
+                for k in range(4):
+                    if k == foot[j]:
+                        envs[i].client.createMultiBody(baseVisualShapeIndex=curr_foot_shp, basePosition=output[j,k])
+                    else:
+                        envs[i].client.createMultiBody(baseVisualShapeIndex=foot_shp, basePosition=output[j,k])
+    output[:,:,0] -= x_pos
+    output[:,:,1] -= y_pos
+    return output, foot, heightmaps, x_pos, y_pos # the last two are just for debugging
+
+
+if __name__ == '__main__':
     N_ENVS = 2
     NUM_X = 2 # number of footstep placements along x direction, per env
     NUM_Y = 2 # number of footstep placements along y direction, per env
@@ -108,42 +131,15 @@ def vis_footsteps():
                         rows_per_m=np.random.uniform(1.0, 1.5), 
                         terrain_height_range=np.random.uniform(0.25, 0.375), render=(i==env_to_render),
                         fixed=True,
-                        fixed_position=[-10.0, 0.0, 1.0]) 
+                        fixed_position=[-10.0, 0.0, 1.0],
+                        terrain_width=5.0,
+                        terrain_length=5.0) 
                         # with multiple envs?
-    assert envs[i].terrain_length == 20  
-    assert envs[i].terrain_width == 10 
 
-    output, foot, heightmaps, est_robot_base_height, x_pos, y_pos = get_observation(NUM_X, NUM_Y, envs, vis=True)
+    output, foot, heightmaps, _, _ = get_observation(NUM_X, NUM_Y, envs, vis=True)
 
-    # visualize foot position locations
-    assert len(output)%N_ENVS == 0
-    n = int(len(output)/N_ENVS)
-    vis_shp = envs[env_to_render].client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1., 0., 0., 1.])
-    for j in range(env_to_render * n, (env_to_render+1) * n):
-        for k in range(4):
-            envs[env_to_render].client.createMultiBody(baseVisualShapeIndex=vis_shp, basePosition=output[j,k])
-    
-    # visualize estimated height of robot
-    vis_shp = envs[env_to_render].client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[0., 1., 0., 1.])
-    for j in range(env_to_render * n, (env_to_render+1) * n):
-        envs[env_to_render].client.createMultiBody(baseVisualShapeIndex=vis_shp, 
-                                                    basePosition=[x_pos[j], y_pos[j], est_robot_base_height[j]])
-
-    # # visualize the heightmaps
-    # grid_len = heightmaps.shape[1] # TODO assumes square heightmaps
-    # for j in range(env_to_render * n, (env_to_render+1) * n):
-    #     for k in range(grid_len):
-    #         for l in range(grid_len):
-    #             envs[env_to_render].client.createMultiBody(baseVisualShapeIndex=vis_shp, 
-    #                                                 basePosition=[x_pos[j], y_pos[j], est_robot_base_height[j]])
-    # TODO just make a vis kwarg to the get_observation function that does all of this
     print('\nDONE')
     time.sleep(1e5)
-
-
-
-if __name__ == '__main__':
-    vis_footsteps()
 
     # np.random.seed(1)
 

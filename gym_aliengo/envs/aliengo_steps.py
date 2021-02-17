@@ -22,6 +22,8 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
     def __init__(self,
                 rows_per_m=2.0, # range from [1.0 to 5.0] (easy to hard) default=2.0
                 terrain_height_range=0.25, # range from [0.0, 0.375] (easy to hard) default=0.25
+                terrain_width=10.0,
+                terrain_length=20.0,
                 **kwargs):
         print(kwargs)
         super().__init__(**kwargs)
@@ -30,8 +32,8 @@ class AliengoSteps(_aliengo_parent.AliengoEnvParent):
         assert rows_per_m > 0.0 and rows_per_m < 10.0
         self.row_width = 1.0/rows_per_m
         self.terrain_height_range = terrain_height_range # +/- half of this value to the height mean 
-        self.terrain_length = 20  #TODO make this parameter scale with reward because terrain generation takes a lot of time 
-        self.terrain_width = 10 #TODO 
+        self.terrain_length = terrain_length
+        self.terrain_width = terrain_width
         self.terrain_height = terrain_height_range/2.0 + 0.01 # this is just the mean height of the blocks
 
         self.block_length_range = self.row_width/2. # the mean is set to the same as row_width. 

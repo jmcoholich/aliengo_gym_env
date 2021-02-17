@@ -1002,11 +1002,12 @@ class Aliengo:
         relative_z_heights = z_heights - base_z
 
         if vis:
+            skip_n = 32 # don't plot all the heightmap points, it just takes forever
             if vis_client is None: raise ValueError('Must pass vis_client to visualize results')
             z_grid = z_heights.reshape((grid_len, grid_len))
             vis_shp = vis_client.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[0., 0., 0., 1.])
-            for i in range(grid_len):
-                for j in range(grid_len):
+            for i in range(0, grid_len, skip_n):
+                for j in range(0, grid_len, skip_n):
                     vis_client.createMultiBody(baseVisualShapeIndex=vis_shp, 
                                             basePosition=[coordinates[0,i,j], coordinates[1,i,j], z_grid[i,j]])
 
