@@ -11,18 +11,15 @@ from gen_footsteps import rand_footsteps
 N_ENVS = 2
 NUM_X = 4 # number of footstep placements along x direction, per env
 NUM_Y = 3 # number of footstep placements along y direction, per env
-X_SPAN = 0.483 # distance between quadruped's front and back nominal foot placements
-Y_SPAN = 0.234 # distance between quadruped's left and right nominal foot placements
-STEP_LEN = 0.2 
 # np.random.seed(1)
 
-#TODO test footstep generation, visualize it in pybullet
+
+# TODO: 
 
 def main():
 
     # create several envs of varying difficulty
     envs = [''] * N_ENVS
-
     for i in range(len(envs)):
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 5.0), 
@@ -32,22 +29,26 @@ def main():
     assert envs[i].terrain_length == 20  
     assert envs[i].terrain_width == 10 
 
-    # """Find X_SPAN and Y_SPAN"""
-    # # generate quadruped footstep locations, at a grid of points
-    # envs[0].quadruped.reset_joint_positions(stochastic=False)
-    # global_pos = np.array([i[0] for i in envs[0].client.getLinkStates(envs[0].quadruped.quadruped, envs[0].quadruped.foot_links)])
 
-    # print('\nx_span: {:.3f}'.format((global_pos[[0,1],0] - global_pos[[2,3],0]).mean()))
-    # print('y_span: {:.3f}'.format(- (global_pos[[0,2],1] - global_pos[[1,3],1]).mean()))
-    # print(global_pos)
-
-    # x = np.expand_dims(np.arange(5), 1)
+    # generate footstep placements in each environment
     x_positions = np.linspace(0.0, envs[0].terrain_length - 1.0, NUM_X)
     y_positions = np.linspace(-envs[0].terrain_width/2.0 + 0.5, envs[0].terrain_width/2.0 - 0.5, NUM_Y)
-
     output, foot = rand_foosteps(x_positions, y_positions, envs)
 
-
+    # get the heightmap around each x and y position. Heighmaps will go through CNN encoder, so store as 2D arrays
+    heightmap_params = {'length': 1.25, # assumes square #TODO allow rectangular
+                            'robot_position': 0.5, # distance of robot base origin from back edge of height map
+                            'grid_spacing': 0.125}
+    pts_per_env = NUM_X * NUM_Y
+    assert pts_per_env * N_ENVS == len(output)
+    heightmaps = np.zeros((pts_per_env * N_ENVS, self.heightmap_params['length']**2))
+    for i in range(N_ENVS):
+        for j in range(pts_per_env * i, pts_per_env * (i + 1)):
+            heightmaps[j] = envs[i].quadruped._get_heightmap(envs[i].fake_client, 
+                                                        ray_start_height=100, #TODO 
+                                                        base_position=[], #TODO
+                                                        heightmap_params=heightmap_params)
+            
 
 if __name__ == '__main__':
     main()

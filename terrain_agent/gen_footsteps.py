@@ -85,7 +85,7 @@ def rand_foosteps(x_pos, y_pos, envs, foot=None, rayFromZ=100.0, x_span=0.483, y
         rayFromPositions[:, :, 2] = rayFromZ
         rayToPositions = rayFromPositions.copy()        
         rayToPositions[:, :, 2] = -1.0
-        raw = envs[i].client.rayTestBatch(rayFromPositions=rayFromPositions.reshape(len_x * len_y * 4, 3), 
+        raw = envs[i].fake_client.rayTestBatch(rayFromPositions=rayFromPositions.reshape(len_x * len_y * 4, 3), 
                                             rayToPositions=rayToPositions.reshape(len_x * len_y * 4, 3))
         assert len(raw) == len_x * len_y * 4
         output[start:end, :, 2] += np.array([raw[i][3][2] for i in range(len(raw))]).reshape((len_x * len_y, 4))
@@ -93,7 +93,7 @@ def rand_foosteps(x_pos, y_pos, envs, foot=None, rayFromZ=100.0, x_span=0.483, y
 
 
 def vis_footsteps():
-    N_ENVS = 1
+    N_ENVS = 2
     NUM_X = 4 # number of footstep placements along x direction, per env
     NUM_Y = 3 # number of footstep placements along y direction, per env
 
@@ -104,9 +104,9 @@ def vis_footsteps():
         print('\n' * 2)
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 2.0), 
-                        terrain_height_range=np.random.uniform(0, 0.375), render=True, # I can render multiple envs 
+                        terrain_height_range=np.random.uniform(0, 0.375), render=(i==1), # I can render multiple envs 
                         fixed=True,
-                        fixed_position=[-10.0, 0.0, 1.0]) #TODO why doe the aliengo_kwargs not pass? Could this be a much bigger issue with my code
+                        fixed_position=[-10.0, 0.0, 1.0]) 
                         # with multiple envs?
     assert envs[i].terrain_length == 20  
     assert envs[i].terrain_width == 10 
