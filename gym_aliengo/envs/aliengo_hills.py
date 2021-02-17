@@ -60,11 +60,7 @@ class AliengoHills(_aliengo_parent.AliengoEnvParent):
         if hard_reset:
             self._hard_reset() # resets the simulation and reloads the plane
             self._create_hills(update=False)
-            self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
-                                            max_torque=self.max_torque, 
-                                            kp=self.kp, 
-                                            kd=self.kd,
-                                            vis=self.vis)
+            self.quadruped = self.init_quadruped()
         else: 
             self._create_hills(update=True)
 

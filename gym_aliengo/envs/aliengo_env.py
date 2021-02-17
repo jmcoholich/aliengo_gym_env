@@ -22,17 +22,16 @@ class AliengoEnv(gym.Env):
                     env_mode='pmtg',
                     apply_perturb=True,
                     avg_time_per_perturb=5.0, # seconds
-                    max_torque=44.4, # N-m, from URDF
-                    kp=0.1, # acts on position error 
-                    kd=1.0, # acts on rate of position erorr
                     action_repeat=4,
                     timeout=60.0, # number of seconds to timeout after
                     flat_ground=True, # this is for getting terrain scan in privileged info for Aliengo 
                     realTime=False, # should never be True when training, only for visualzation or debugging MAYBE
                     vis=False,
-                    fixed=False,
-                    fixed_position=[0,0,1.0], 
-                    fixed_orientation=[0,0,0]):
+                    **quadruped_kwargs):
+                    # fixed=False,
+                    # fixed_position=[0,0,1.0], 
+                    # fixed_orientation=[0,0,0],
+                    # gait_type='trot'):
         # Environment Options
         self.env_mode = env_mode
         self.apply_perturb = apply_perturb
@@ -42,16 +41,11 @@ class AliengoEnv(gym.Env):
         # if U[0, 1) is less than this, perturb
         self.perturb_p = 1.0/(self.avg_time_per_perturb * 240.0) * self.n_hold_frames
         self.flat_ground = flat_ground
-
+        self.quadruped_kwargs = quadruped_kwargs
+        print('self.quadruped_kwargs in aliengo_env', self.quadruped_kwargs)
         # setting these to class variables so that child classes can use it as such. 
         self.realTime = realTime 
-        self.max_torque = max_torque
-        self.kp = kp 
-        self.kd = kd
         self.vis = vis
-        self.fixed = fixed
-        self.fixed_orientation = fixed_orientation
-        self.fixed_position = fixed_position
         if render:
             self.client = bc.BulletClient(connection_mode=p.GUI)
         else:
@@ -61,14 +55,7 @@ class AliengoEnv(gym.Env):
             raise RuntimeError('Pybullet could not connect to physics client')
 
         self.plane = self.client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
-        self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
-                                            max_torque=max_torque, 
-                                            kp=kp, 
-                                            kd=kd,
-                                            vis=vis,
-                                            fixed=self.fixed,
-                                            fixed_orientation=self.fixed_orientation,
-                                            fixed_position=self.fixed_position)
+        self.quadruped = self.init_quadruped()
         self.fake_client = None
         self.client.setGravity(0,0,-9.8)
         if self.realTime:
@@ -111,6 +98,12 @@ class AliengoEnv(gym.Env):
             dtype=np.float32
             )
 
+
+    def init_quadruped(self):
+        quadruped = aliengo.Aliengo(pybullet_client=self.client, 
+                                            vis=self.vis,
+                                            **self.quadruped_kwargs)
+        return quadruped
 
 
     def step(self, action):
@@ -194,8 +187,13 @@ class AliengoEnv(gym.Env):
         prevent the robot from jumping/falling on first user command. '''
 
         self.eps_step_counter = 0
+        if 'fixed' in self.quadruped_kwargs: # if I previous said the quadruped should be fixed, don't move it
+            if self.quadruped_kwargs['fixed'] and 'fixed_position' in self.quadruped_kwargs:
+                posObj = self.quadruped_kwargs['fixed_position']
+        else: 
+            posObj = [0,0,base_height]
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
-                                            posObj=[0,0,base_height], 
+                                            posObj=posObj, 
                                             ornObj=[0,0,0,1.0]) 
 
         self.quadruped.reset_joint_positions(stochastic=stochastic) 

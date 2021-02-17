@@ -42,11 +42,7 @@ class AliengoStairs(_aliengo_parent.AliengoEnvParent):
     def reset(self):       
         super()._hard_reset()
         self._create_stairs()
-        self.quadruped = aliengo.Aliengo(pybullet_client=self.client, 
-                                        max_torque=self.max_torque, 
-                                        kp=self.kp, 
-                                        kd=self.kd,
-                                        vis=self.vis)
+        self.quadruped = self.init_quadruped()
         return super().reset()
 
 

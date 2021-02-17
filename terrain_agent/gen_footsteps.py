@@ -104,7 +104,7 @@ def vis_footsteps():
         print('\n' * 2)
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 2.0), 
-                        terrain_height_range=np.random.uniform(0, 0.375), render=False, # I can render multiple envs 
+                        terrain_height_range=np.random.uniform(0, 0.375), render=True, # I can render multiple envs 
                         fixed=True,
                         fixed_position=[-10.0, 0.0, 1.0]) #TODO why doe the aliengo_kwargs not pass? Could this be a much bigger issue with my code
                         # with multiple envs?
