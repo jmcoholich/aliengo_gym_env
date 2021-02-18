@@ -10,8 +10,8 @@ from agent import TerrainAgent
 
 
 N_ENVS = 2
-NUM_X = 4 # number of footstep placements along x direction, per env
-NUM_Y = 3 # number of footstep placements along y direction, per env
+NUM_X = 2 # number of footstep placements along x direction, per env
+NUM_Y = 2 # number of footstep placements along y direction, per env
 # np.random.seed(1)
 
 
@@ -46,11 +46,13 @@ def main():
     # TODO use float 32 instead of float 64 for everything.
     # TODO make sure the envs are freed from memory after I'm done generating data
     # TODO add CUDA
+    # TODO add noise to the observations
     
     # fwd pass
     foot_positions = torch.from_numpy(foot_positions).type(torch.float32)
     foot = torch.from_numpy(foot).unsqueeze(1).type(torch.float32)
     heightmaps = torch.from_numpy(heightmaps).unsqueeze(1).type(torch.float32) # add channel dimension of 1
+    breakpoint()
     output = agent(foot_positions, foot, heightmaps)
     
 

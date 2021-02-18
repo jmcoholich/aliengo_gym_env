@@ -10,7 +10,7 @@ from agent import TerrainAgent
 
 
 N_ENVS = 1
-NUM_X = 4 # number of footstep placements along x direction, per env
+NUM_X = 7 # number of footstep placements along x direction, per env
 NUM_Y = 3 # number of footstep placements along y direction, per env
 # np.random.seed(1)
 
@@ -21,11 +21,11 @@ def eval_agent(agent, vis=False):
     for i in range(len(envs)):
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 5.0), 
-                        terrain_height_range=np.random.uniform(0, 0.375), render=True,
+                        terrain_height_range=np.random.uniform(0.25, 0.375), render=True,
                         fixed=True,
                         fixed_position=[-10,0,1.0],
-                        terrain_width=3.0,
-                        terrain_length=5.0)
+                        terrain_width=5.0,
+                        terrain_length=10.0)
 
     # initialize neural network
     agent = TerrainAgent()

@@ -99,7 +99,7 @@ if __name__ == '__main__':
     foot_x = 5.1
     foot_y = 0.25
     start = time.time()
-    create_costmap(env.fake_client, [foot_x, foot_y], mesh_res=50, vis=False)
+    create_costmap(env.fake_client, [foot_x, foot_y], mesh_res=50, vis=True)
     end = time.time()
     print(end-start)
 
