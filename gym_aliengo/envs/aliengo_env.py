@@ -116,7 +116,7 @@ class AliengoEnv(gym.Env):
             # f = action[:4]
             f = np.tile(action[0], 4) #TODO decide whether or not to keep this
             residuals = action[4:].reshape((4,3))
-            self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
+            self.quadruped.set_trajectory_parameters(1./(2*np.pi), f=f, residuals=residuals)
             self.t += 1./240. * self.n_hold_frames
         elif self.env_mode == 'flat':
             self.quadruped.set_joint_position_targets(action)
@@ -190,6 +190,8 @@ class AliengoEnv(gym.Env):
         if 'fixed' in self.quadruped_kwargs: # if I previous said the quadruped should be fixed, don't move it
             if self.quadruped_kwargs['fixed'] and 'fixed_position' in self.quadruped_kwargs:
                 posObj = self.quadruped_kwargs['fixed_position']
+            else:
+                posObj = [0,0,base_height]
         else: 
             posObj = [0,0,base_height]
         self.client.resetBasePositionAndOrientation(self.quadruped.quadruped,
@@ -198,6 +200,7 @@ class AliengoEnv(gym.Env):
 
         self.quadruped.reset_joint_positions(stochastic=stochastic) 
         for i in range(500): # to let the robot settle on the ground.
+            # time.sleep(0.1)
             self.client.stepSimulation()
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)
         if self.env_mode == 'pmtg':

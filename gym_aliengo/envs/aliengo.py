@@ -637,7 +637,7 @@ class Aliengo:
 
         # other trajectory parameters
         step_height = 0.2 # from paper
-        step_bottom = -0.45 # from paper
+        step_bottom = -0.1 # from paper
         lateral_offset = 0.075 # how much to push the feet out 
         x_offset = 0.02109375 # experimental, close to balance 
 
@@ -675,8 +675,8 @@ class Aliengo:
         think it matters.)'''
 
         # frequency adjustments, then foot position residuals
-        lb = np.array([-0.00001] * 4 + [-0.2] * 12) # TODO
-        ub = np.array([0.000001] * 4 + [0.2] * 12) 
+        lb = np.array([-100] * 4 + [-0.2] * 12) # TODO
+        ub = np.array([100] * 4 + [0.2] * 12) 
         return lb, ub
 
 
@@ -1103,7 +1103,6 @@ class Aliengo:
         if not true_positions:
             assert ((-1.0 <= positions) & (positions <= 1.0)).all(), '\nposition received: ' + str(positions) + '\n'
             positions = self._actions_to_positions(positions)
-
         self.client.setJointMotorControlArray(self.quadruped,
             self.motor_joint_indices,
             controlMode=p.POSITION_CONTROL,
@@ -1197,52 +1196,58 @@ class Aliengo:
 
         
     def reset_joint_positions(self, positions=None, stochastic=True):
+        # the idea is to set all legs at phase zero.
+        f = -np.ones(4) - np.array([0.0, 1.0, 0.5, 1.5]) * np.pi 
+        self.set_trajectory_parameters(1./(2*np.pi),
+                                    f=f)
+
+
         '''This ignores any physics or controllers and just overwrites joint positions to the given value. 
         Returns the foot positions in foot frame, for use as an initial observation in PMTG controllers. 
         NOTE: I am assuming that this function is always called during env.reset(). I am using it to 
         initialize self.foot_target_history and self.phases
         ''' 
 
-        if positions: 
-            positions = self._actions_to_positions(positions)
-        else: 
-            # use the default starting position, knees slightly bent, from first line of mocap file
-            positions = np.array([0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
-                            -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304])
+        # if positions: 
+        #     positions = self._actions_to_positions(positions)
+        # else: 
+        #     # use the default starting position, knees slightly bent, from first line of mocap file
+        #     positions = np.array([0.037199,    0.660252,   -1.200187,   -0.028954,    0.618814, 
+        #                     -1.183148,    0.048225,    0.690008,   -1.254787,   -0.050525,    0.661355,   -1.243304])
 
-        if stochastic: 
-            # add random noise to positions
-            noise = (np.random.rand(12) - 0.5) * self.position_range * 0.05
-            positions += noise
-            positions = np.clip(positions, self.positions_lb, self.positions_ub)
+        # if stochastic: 
+        #     # add random noise to positions
+        #     noise = (np.random.rand(12) - 0.5) * self.position_range * 0.05
+        #     positions += noise
+        #     positions = np.clip(positions, self.positions_lb, self.positions_ub)
 
 
 
-        for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
-            self.client.resetJointState(self.quadruped, 
-                                self.motor_joint_indices[i],
-                                positions[i],
-                                targetVelocity=0)
+        # for i in range(self.n_motors): # for some reason there is no p.resetJointStates (plural)
+        #     self.client.resetJointState(self.quadruped, 
+        #                         self.motor_joint_indices[i],
+        #                         positions[i],
+        #                         targetVelocity=0)
 
-        ''' TODO: see if the following is actually necessary. i.e. does pybullet retain motor control targets after you 
-         Reset joint positions? If so, the following is necessary'''
+        # ''' TODO: see if the following is actually necessary. i.e. does pybullet retain motor control targets after you 
+        #  Reset joint positions? If so, the following is necessary'''
 
-        self.client.setJointMotorControlArray(self.quadruped,
-                                    self.motor_joint_indices,
-                                    controlMode=p.POSITION_CONTROL,
-                                    targetPositions=positions,
-                                    forces=self.max_torque * np.ones(self.n_motors),
-                                    positionGains=self.kp * np.ones(12),
-                                    velocityGains=self.kd * np.ones(12))
-
+        # self.client.setJointMotorControlArray(self.quadruped,
+        #                             self.motor_joint_indices,
+        #                             controlMode=p.POSITION_CONTROL,
+        #                             targetPositions=positions,
+        #                             forces=self.max_torque * np.ones(self.n_motors),
+        #                             positionGains=self.kp * np.ones(12),
+        #                             velocityGains=self.kd * np.ones(12))
 
 
         self.foot_target_history = [self.get_foot_frame_foot_positions()] * 3
-        self.phases = np.array([0, np.pi, np.pi, 0])
-        self.f_i = np.zeros(4)
-        self.joint_pos_error_history = [np.zeros(12)] * 3 
-        self.joint_velocity_history = [np.zeros(12)] * 3
-        self.true_joint_position_target_history = [positions] * 3
+        # self.phases = np.array([0, np.pi, np.pi, 0])
+        # self.f_i = np.zeros(4)
+        # self.joint_pos_error_history = [np.zeros(12)] * 3 
+        # self.joint_velocity_history = [np.zeros(12)] * 3
+        # self.true_joint_position_target_history = [positions] * 3
+        # self.set_trajectory_parameters()
         return self.foot_target_history[0]
 
 
@@ -1443,8 +1448,35 @@ def test_calf_joint_torques(client, quadruped):
         time.sleep(1.0/240)
 
 
+def handcraft_walk():
+    import gym
+    env = gym.make('gym_aliengo:Aliengo-v0', render=True, gait_type='walk', apply_perturb=False, fixed=True, fixed_position=[0.0,0.0,1.0], vis=True, kp=10.0)
+    for _ in range(500):
+        env.client.stepSimulation()
+        env.quadruped.set_trajectory_parameters(1./(2*np.pi),
+            f=-np.ones(4) - np.array([0.0, 1.0, 0.5, 1.5]) * np.pi )
+    breakpoint()
+    time = 0.0
+    while True:
+        # env.quadruped.set_trajectory_parameters(time)
+        # env.quadruped.update_state(flat_ground=True)
+        time += 1/240.0
+        env.client.stepSimulation()
+
+
+
+    # for _ in range(1):
+    #     env.reset(stochastic=False)
+    # while True:
+    #     breakpoint()
+    #     f = -np.ones(4) - np.array([0.0, 1.0, 0.5, 1.5]) * np.pi 
+    #     action = np.zeros(16)
+    #     action[:4] = f
+    #     env.step(action)
+    #     time.sleep(1/240. * 4 * 10.0)
 
 if __name__ == '__main__':
+    handcraft_walk()
     # plot_trajectory()
 
     # set up the quadruped in a pybullet simulation
