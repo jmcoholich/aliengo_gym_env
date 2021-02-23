@@ -24,7 +24,6 @@ main.py --env-name gym_aliengo:FootstepParam-v0 --wandb-project FootstepParam-v0
 
 
 Termination: same as parent
-
 """
 
 class FootstepParam(aliengo_env.AliengoEnv):
@@ -254,7 +253,6 @@ class FootstepParam(aliengo_env.AliengoEnv):
             print("Action passed to env.step(): ", action)
             raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
         
-        self.quadruped.footstep_param_action(action)
         rand = np.random.random_sample()
         p = 0.005
         if rand < p:
@@ -264,6 +262,7 @@ class FootstepParam(aliengo_env.AliengoEnv):
                 self.quadruped.apply_torso_disturbance(wrench=None, max_force_mag=5000 * 0.1, max_torque_mag=500 * 0.1)
 
         for _ in range(self.n_hold_frames): 
+            self.quadruped.footstep_param_action(action)
             self.client.stepSimulation()
             if self.vis: self.quadruped.visualize()
         self.eps_step_counter += 1

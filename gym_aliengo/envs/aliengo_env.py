@@ -107,22 +107,6 @@ class AliengoEnv(gym.Env):
 
 
     def step(self, action):
-        DELTA = 0.01
-        if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
-            print("Action passed to env.step(): ", action)
-            raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
-
-        if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
-            # f = action[:4]
-            f = np.tile(action[0], 4) #TODO decide whether or not to keep this
-            residuals = action[4:].reshape((4,3))
-            self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
-            self.t += 1./240. * self.n_hold_frames
-        elif self.env_mode == 'flat':
-            self.quadruped.set_joint_position_targets(action)
-        else: raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg', or 'flat'. "
-                                                                            "Value {} was given.".format(self.env_mode))
-
         if (np.random.rand() < self.perturb_p) and self.apply_perturb: 
             '''TODO eventually make disturbance generating function that applies disturbances for multiple timesteps'''
             if np.random.rand() > 0.5:
@@ -132,9 +116,32 @@ class AliengoEnv(gym.Env):
                 # TODO returned values will be part of privledged information for teacher training
                 wrench = self.quadruped.apply_torso_disturbance()
 
-        for _ in range(self.n_hold_frames): 
-            self.client.stepSimulation()
-            if self.vis: self.quadruped.visualize()
+        DELTA = 0.01
+        if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
+            print("Action passed to env.step(): ", action)
+            raise ValueError('Action is out-of-bounds of:\n' + str(self.action_lb) + '\nto\n' + str(self.action_ub)) 
+
+        if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
+            # f = action[:4]
+            f = np.tile(action[0], 4) #TODO decide whether or not to keep this
+            residuals = action[4:].reshape((4,3))
+            for _ in range(self.n_hold_frames):
+                self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
+                self.t += 1./240.
+                self.client.stepSimulation()
+                if self.vis: self.quadruped.visualize()
+        elif self.env_mode == 'flat':
+            for _ in range(self.n_hold_frames):
+                self.quadruped.set_joint_position_targets(action)
+                self.client.stepSimulation()
+                if self.vis: self.quadruped.visualize()
+        else: raise ValueError("env_mode should either be 'pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg', or 'flat'. "
+                                                                            "Value {} was given.".format(self.env_mode))
+
+
+        # for _ in range(self.n_hold_frames): 
+        #     self.client.stepSimulation()
+        #     if self.vis: self.quadruped.visualize()
         self.eps_step_counter += 1
         self.quadruped.update_state(flat_ground=self.flat_ground, fake_client=self.fake_client)
 
