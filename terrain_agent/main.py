@@ -11,8 +11,8 @@ from loss import Loss
 
 
 N_ENVS = 2
-NUM_X = 20 # number of footstep placements along x direction, per env
-NUM_Y = 20 # number of footstep placements along y direction, per env
+NUM_X = 2 # number of footstep placements along x direction, per env
+NUM_Y = 2 # number of footstep placements along y direction, per env
 # np.random.seed(1)
 
 '''
@@ -50,8 +50,7 @@ def main():
 
     # Training #########################################################################################################
     # initialize loss object
-    loss = Loss(envs)
-    loss.to(device)
+    loss = Loss(envs, device)
     del envs
 
     x_pos = torch.from_numpy(x_pos).type(torch.float32).to(device)

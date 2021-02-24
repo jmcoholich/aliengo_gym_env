@@ -9,7 +9,7 @@ import sys
 import torch
 
 class Loss:
-    def __init__(self, envs, mesh_res=50, rayFromZ=100.): #TODO up mesh_res to 100, but need to change the loss params
+    def __init__(self, envs, device, mesh_res=50, rayFromZ=100.): #TODO up mesh_res to 100, but need to change the loss params
         # generate and store heightmap of all envs
         self.mesh_res = mesh_res
         self.x_lb = -2.0
@@ -20,10 +20,78 @@ class Loss:
         self.num_y = int((self.y_ub - self.y_lb) * self.mesh_res + 1) # per env
 
         n_envs = len(envs)
-        self.heightmaps = [None] * n_envs
-        for i in range(n_envs):
+        self.heightmaps = torch.zeros((n_envs, self.num_x, self.num_y))
+        for i in range(n_envs): # this can't be vectorized due to use of pybullet.getRayTestBatch()
             self.heightmaps[i] = torch.from_numpy(self.get_heightmap(envs[i], rayFromZ))
+        self.to(device)
+        self.convert_heightmaps_to_costmaps()
         
+
+    def convert_heightmaps_to_costmaps(self, vis=False):
+        """
+        Converts a grid of heights to a terrain costmap.
+        Current involves convolution with gaussian blur and Laplacian filter. 
+        Zero pad the image (presumably, the heightmap covers the edges of the terrian, beyond which everything is zero
+        elevation anyways.)
+        """
+        assert self.mesh_res == 50 #TODO generalize gaussian filter params to different mesh resolutions 
+        self.heightmaps = self.heightmaps.unsqueeze(1)
+        if vis: 
+            pch_i = [self.heightmaps.shape[2]//2, self.heightmaps.shape[3]//2] # patch indices
+            pch_s = 75
+            show('raw heightmap', self.heightmaps[0, 0], ratio=0.75)
+            show('raw heightmap patch', 
+                    self.heightmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
+                    ratio=4)
+        g_ksize = 31
+        l_ksize = 3
+        g_filt = self.create_2d_gaussian(ksize=g_ksize, sigma=3.0, vis=vis).unsqueeze(0).unsqueeze(0)
+        lap_filt = self.create_laplacian(ksize=l_ksize).unsqueeze(0).unsqueeze(0)
+
+        self.heightmaps = torch.nn.functional.conv2d(self.heightmaps, 
+                                                lap_filt, 
+                                                padding=int((l_ksize - 1)/2)).abs()
+        if vis: 
+            show('lap_filtered', self.heightmaps[0, 0], ratio=0.75)
+            show('lap_filtered patch', 
+                self.heightmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
+                ratio=4.)
+
+        self.heightmaps = torch.nn.functional.conv2d(self.heightmaps, 
+                                                    g_filt, 
+                                                    padding=int((g_ksize - 1)/2))
+        if vis: 
+            show_heat('final_costmap', self.heightmaps[0, 0], ratio=0.75)
+            show_heat('final_costmap patch', 
+                        self.heightmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
+                        ratio=4.)
+        
+        self.heightmaps = self.heightmaps.squeeze()
+        
+        if vis: 
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+
+    def create_laplacian(self, ksize):
+        if ksize != 3: raise NotImplementedError('kernel size must be 3 for now')
+
+        return torch.Tensor([   [0., 1., 0.],
+                                [1., -4., 1.],
+                                [0., 1., 0.]])
+
+    def create_2d_gaussian(self, ksize, sigma, vis=False):
+        if ksize%2 == 0: raise ValueError('square kernel size must be odd')
+        n = (ksize - 1)/2.0
+        x = torch.linspace(-n, n, ksize)
+        x = torch.exp(-0.5 * (x/sigma) * (x/sigma)) # omit coefficients since I will normalize it anyways
+        x = x.unsqueeze(1) @ x.unsqueeze(0)
+        x /= x.sum()
+        if vis: 
+            import cv2
+            show('gaussian filter', x.numpy())
+        return x 
+
     
     def get_heightmap(self, env, rayFromZ, vis=True): #TODO vis
         # NOTE if the env is not AliengoSteps, this will throw an error
@@ -70,9 +138,6 @@ class Loss:
             #     env.client.createMultiBody(baseVisualShapeIndex=shape, 
             #                                 basePosition=[ray_array[i, 0], ray_array[i, 1], heights[i]])
         
-        # TODO convolve the entire heightmap with the blur and edges filter first,
-        # Filters should use the mesh_res as a parameter.
-        # Do it without cv2
         return heights
 
 
@@ -115,7 +180,7 @@ class Loss:
         
 
     def to(self, device):
-        for tensor in self.heightmaps: tensor.to(device)
+        self.heightmaps.to(device)
 
 
 
