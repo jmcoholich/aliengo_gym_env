@@ -21,7 +21,8 @@ def eval_agent(agent, vis=False):
     for i in range(len(envs)):
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', 
                         rows_per_m=np.random.uniform(1.0, 5.0), 
-                        terrain_height_range=np.random.uniform(0.25, 0.375), render=True,
+                        terrain_height_range=np.random.uniform(0.25, 0.375), 
+                        render=True,
                         fixed=True,
                         fixed_position=[-10,0,1.0],
                         terrain_width=5.0,
@@ -35,7 +36,7 @@ def eval_agent(agent, vis=False):
                         'grid_spacing': 1.0/64.0}
 
     # generate all data in the beginning
-    foot_positions, foot, heightmaps, x_pos, y_pos = get_observation(NUM_X, NUM_Y, envs, 
+    foot_positions, foot, heightmaps, x_pos, y_pos, est_robot_base_height, _ = get_observation(NUM_X, NUM_Y, envs, 
                                                                     heightmap_params=heightmap_params, vis=vis)
 
     
@@ -48,7 +49,7 @@ def eval_agent(agent, vis=False):
     if vis:
         pred_foot_shp = envs[0].client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1., 1., 1., 1.])
         for i in range(len(output)):
-            basePosition = [output[i,0] + x_pos[i], output[i,1] + y_pos[i], output[i,2]]
+            basePosition = [output[i,0] + x_pos[i], output[i,1] + y_pos[i], output[i,2] + est_robot_base_height[i]]
             envs[0].client.createMultiBody(baseVisualShapeIndex=pred_foot_shp, basePosition=basePosition)
         time.sleep(1e5)
 

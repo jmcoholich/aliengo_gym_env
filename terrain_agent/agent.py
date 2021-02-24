@@ -2,8 +2,11 @@ import torch
 from torch import nn
 
 class TerrainAgent(nn.Module):
-    def __init__(self):
+    def __init__(self, means, stds):
         super(TerrainAgent, self).__init__()
+        self.means = means
+        self.stds = stds
+        
         # the image size is going to be 65 x 65
         self.pool = nn.MaxPool2d(2)
         self.relu = nn.ReLU()
@@ -13,10 +16,15 @@ class TerrainAgent(nn.Module):
         self.encoder_linear = nn.Linear(392, 64)
         self.linear1 = nn.Linear(77, 64)
         self.linear2 = nn.Linear(64, 64)
-        self.linear3 = nn.Linear(64, 3) # output is an x and y relative to robot xy position
+        self.linear3 = nn.Linear(64, 3) # output is xyz relative to robot torso center.
         # TODO make sure all inputs/ and outputs and relative to each other, not in absolute coordinates or anything
 
     def forward(self, foot_positions, foot, heightmap):
+        # first normalize
+        foot_positions = (foot_positions - self.means[0])/(self.stds[0] + 1e-5)
+        foot = (foot - self.means[1])/(self.stds[1] + 1e-5)
+        heightmap = (heightmap - self.means[2])/(self.stds[2] + 1e-5)
+        
         assert foot_positions.shape[0] == foot.shape[0] == heightmap.shape[0] # batch sizes are all the same
         n = foot_positions.shape[0]
         encoded_pic = self.cnn_encoder(heightmap)

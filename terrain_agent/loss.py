@@ -5,6 +5,106 @@ import warnings
 import time
 import cv2
 import matplotlib.pyplot as plt
+import sys
+import torch
+
+class Loss:
+    def __init__(self, envs, mesh_res=50, rayFromZ=100.): #TODO up mesh_res to 100, but need to change the loss params
+        # generate and store heightmap of all envs
+        self.mesh_res = mesh_res
+        self.x_lb = -2.0
+        self.x_ub = envs[0].terrain_length + 2.0
+        self.y_lb = -envs[0].terrain_width/2.0 - 0.5
+        self.y_ub = envs[0].terrain_width/2.0 + 0.5
+        self.num_x = int((self.x_ub - self.x_lb) * self.mesh_res + 1) # per env
+        self.num_y = int((self.y_ub - self.y_lb) * self.mesh_res + 1) # per env
+
+        n_envs = len(envs)
+        self.heightmaps = [None] * n_envs
+        for i in range(n_envs):
+            self.heightmaps[i] = torch.from_numpy(self.get_heightmap(envs[i], rayFromZ))
+        
+    
+    def get_heightmap(self, env, rayFromZ, vis=True): #TODO vis
+        # NOTE if the env is not AliengoSteps, this will throw an error
+
+        max_batch_size = int(1e4 + 6e3) # this is the approx max number of rays you can do at a time with rayTestBatch
+        assert env.terrain_length == 20  
+        assert env.terrain_width == 10 
+
+
+        num_pts = self.num_x * self.num_y
+        if num_pts > 250 * 1e6: # if the ray_array will use more than a gig of memory
+            raise RuntimeError('Number of points in terrain heightmap for loss is too high.'.format(num_pts))
+
+        ray_array = np.zeros((num_pts, 4), dtype=np.float32)
+        ray_array[:, 0] = np.linspace(self.x_lb, self.x_ub, self.num_x).repeat(self.num_y)
+        ray_array[:, 1] = np.tile(np.linspace(self.y_lb, self.y_ub, self.num_y), self.num_x)
+        ray_array[:, 2] = rayFromZ
+        ray_array[:, 3] = -1.0
+        
+        heights = np.zeros(num_pts, dtype=np.float32)
+        for i in range(int(num_pts//max_batch_size)):
+            start = int(i * max_batch_size)
+            end = int((i+1) * max_batch_size)
+            raw = env.client.rayTestBatch(rayFromPositions=ray_array[start:end, [0,1,2]], 
+                                            rayToPositions=ray_array[start:end, [0,1,3]], 
+                                            numThreads=0)
+            heights[start: end] = np.array([raw[j][3][2] for j in range(max_batch_size)])    
+        raw = env.client.rayTestBatch(rayFromPositions=ray_array[end:, [0,1,2]], 
+                                        rayToPositions=ray_array[end:, [0,1,3]], 
+                                        numThreads=0)
+        assert len(raw) == num_pts%max_batch_size
+        heights[end:] = np.array([raw[j][3][2] for j in range(num_pts%max_batch_size)])
+        heights = heights.reshape((self.num_x, self.num_y)) #NOTE verified this is the correct order of dimensions
+        if vis:
+            shape = env.client.createVisualShape(p.GEOM_SPHERE, radius=0.04, rgbaColor=[1., 0., 0., 1.])
+            step = 100
+            for i in range(0, self.num_x, step):
+                for j in range(0, self.num_y, step):
+                    k = j + i * self.num_y
+                    env.client.createMultiBody(baseVisualShapeIndex=shape, 
+                                            basePosition=[ray_array[k, 0], ray_array[k, 1], heights[i, j]])
+
+            # for i in range(0, num_pts, 1000):
+            #     env.client.createMultiBody(baseVisualShapeIndex=shape, 
+            #                                 basePosition=[ray_array[i, 0], ray_array[i, 1], heights[i]])
+        return heights
+
+
+    def loss(self, pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx): #TODO vectorize
+        n = pred_next_step.shape[0]
+        for i in range(n):
+            # get the xy of the input foot
+            current_xyz = foot_positions[i, foot[i]]
+            current_xyz[0] += x_pos[i]
+            current_xyz[1] += y_pos[i]
+            current_xyz[2] += est_robot_base_height[i]
+
+            # convert this xy position to an index of the heights array.
+            x_idx = torch.round((current_xyz[0] - self.x_lb) * self.mesh_res)
+            y_idx = torch.round((current_xyz[1] - self.y_lb) * self.mesh_res)
+            if x_idx > self.num_x - 1 or y_idx > self.num_y - 1:
+                raise ValueError('The indices of the loss heightfield are out of bounds.'
+                ' Try increasing bounds of heightfield or check for bugs')
+
+            '''
+            closest_mesh_xyz = self.heightmaps[env_idx[i]][]
+            # TODO verify that I'm matching points with the current heights
+
+            # get the costmap surrounding it
+            assert that this xyz lies on the terrain
+            assert that I am no more than half the diagonal of the square away from any point
+            '''
+    def get_costmap(self):
+        pass
+
+        
+
+    def to(self, device):
+        for tensor in self.heightmaps: tensor.to(device)
+
+
 
 
 def norm(img):
@@ -32,7 +132,7 @@ def show_heat(name, img, ratio=4):
     cv2.imshow(name, heatmap)
 
 
-def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, vis=False):
+def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, vis=False): #TODO pass the env idx to this as well.
     """
     terrain_bounds should be [x_lb, x_ub, y_lb, y_ub]. Assumes bounds are rectangular.
     mesh_res is points per m

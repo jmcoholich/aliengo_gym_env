@@ -113,7 +113,10 @@ def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483,
                         envs[i].client.createMultiBody(baseVisualShapeIndex=foot_shp, basePosition=output[j,k])
     output[:,:,0] -= x_pos
     output[:,:,1] -= y_pos
-    return output, foot, heightmaps, x_pos, y_pos # the last two are just for debugging
+    est_robot_base_height = np.expand_dims(est_robot_base_height, 1)
+    output[:,:,2] -= est_robot_base_height
+    env_idx = np.expand_dims(np.arange(num_envs, dtype=np.int8).repeat(num_x * num_y), 1)
+    return output, foot, heightmaps, x_pos, y_pos, est_robot_base_height, env_idx 
 
 
 if __name__ == '__main__':
