@@ -69,35 +69,48 @@ class Loss:
             # for i in range(0, num_pts, 1000):
             #     env.client.createMultiBody(baseVisualShapeIndex=shape, 
             #                                 basePosition=[ray_array[i, 0], ray_array[i, 1], heights[i]])
+        
+        # TODO convolve the entire heightmap with the blur and edges filter first,
+        # Filters should use the mesh_res as a parameter.
+        # Do it without cv2
         return heights
 
 
     def loss(self, pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx): #TODO vectorize
         n = pred_next_step.shape[0]
+        num_passed_test = 0
         for i in range(n):
             # get the xy of the input foot
-            current_xyz = foot_positions[i, foot[i]]
-            current_xyz[0] += x_pos[i]
-            current_xyz[1] += y_pos[i]
-            current_xyz[2] += est_robot_base_height[i]
+            current_xyz = foot_positions[i, int(foot[i])]
+            current_xyz[0] += x_pos[i].item()
+            current_xyz[1] += y_pos[i].item()
+            current_xyz[2] += est_robot_base_height[i].item()
 
             # convert this xy position to an index of the heights array.
-            x_idx = torch.round((current_xyz[0] - self.x_lb) * self.mesh_res)
-            y_idx = torch.round((current_xyz[1] - self.y_lb) * self.mesh_res)
+            x_idx = int(torch.round((current_xyz[0] - self.x_lb) * self.mesh_res))
+            y_idx = int(torch.round((current_xyz[1] - self.y_lb) * self.mesh_res))
             if x_idx > self.num_x - 1 or y_idx > self.num_y - 1:
                 raise ValueError('The indices of the loss heightfield are out of bounds.'
                 ' Try increasing bounds of heightfield or check for bugs')
 
-            '''
-            closest_mesh_xyz = self.heightmaps[env_idx[i]][]
-            # TODO verify that I'm matching points with the current heights
+            closest_mesh_xyz = torch.Tensor(3)
+            closest_mesh_xyz[0] = x_idx/self.mesh_res + self.x_lb
+            closest_mesh_xyz[1] = y_idx/self.mesh_res + self.y_lb
+            closest_mesh_xyz[2] = self.heightmaps[int(env_idx[i])][x_idx, y_idx]
 
+            if abs(closest_mesh_xyz[2] - current_xyz[2]) < 1e-3: num_passed_test += 1
+
+            # assert the closest mesh point is not more than square diag away 
+            max_dist = 1.0/self.mesh_res * (2**0.5)/2.0
+            dist = ((current_xyz[0] - closest_mesh_xyz[0])**2 + (current_xyz[1] - closest_mesh_xyz[1])**2)**0.5
+            assert dist <= max_dist, '{} percent higher than max dist'.format((dist-max_dist)/max_dist * 100)
             # get the costmap surrounding it
-            assert that this xyz lies on the terrain
-            assert that I am no more than half the diagonal of the square away from any point
-            '''
-    def get_costmap(self):
-        pass
+        print('{} percent passes z-matching test for {} datapoints'.format(float(num_passed_test)/n), n)
+
+
+    # def get_costmap(self, x_idx, y_idx, env_idx):
+    #     # get 
+    #     pass
 
         
 

@@ -11,8 +11,8 @@ from loss import Loss
 
 
 N_ENVS = 2
-NUM_X = 2 # number of footstep placements along x direction, per env
-NUM_Y = 2 # number of footstep placements along y direction, per env
+NUM_X = 20 # number of footstep placements along x direction, per env
+NUM_Y = 20 # number of footstep placements along y direction, per env
 # np.random.seed(1)
 
 '''
@@ -23,7 +23,7 @@ TODO add wandb
 
 
 def main():
-    device = 'cuda'
+    device = 'cpu'
     epochs = 10
 
 
@@ -32,8 +32,8 @@ def main():
     envs = [''] * N_ENVS
     for i in range(len(envs)):
         envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', # NOTE changing env type will break code
-                        rows_per_m=np.random.uniform(1.0, 1.0), #TODO bounds
-                        terrain_height_range=np.random.uniform(0.3, 0.375), render=i==0,#TODO render and bounds
+                        rows_per_m=np.random.uniform(1.0, 5.0),
+                        terrain_height_range=np.random.uniform(0.0, 0.375), render=False,
                         fixed=True,
                         fixed_position=[-10,0,1.0])
     assert envs[i].terrain_length == 20  
