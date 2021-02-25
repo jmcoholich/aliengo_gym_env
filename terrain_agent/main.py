@@ -10,11 +10,11 @@ from agent import TerrainAgent
 from loss import Loss
 
 
-N_ENVS = 1
+N_ENVS = 2
 NUM_X = 20 # number of footstep placements along x direction, per env
 NUM_Y = 20 # number of footstep placements along y direction, per env
-EPOCHS = 10
-LR = 3e-4
+EPOCHS = 1000
+LR = 3e-5
 MAX_GRAD_NORM = 2.0
 np.random.seed(1)
 torch.manual_seed(1)

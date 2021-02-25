@@ -26,11 +26,11 @@ class Loss:
         self.heightmaps = torch.zeros((n_envs, self.num_x, self.num_y))
         for i in range(n_envs): # this can't be vectorized due to use of pybullet.getRayTestBatch()
             self.heightmaps[i] = torch.from_numpy(self.get_heightmap(envs[i], rayFromZ))
-        self.heightmaps.to(device)
-        self.costmaps = self.create_costmaps(self.heightmaps)
+        self.heightmaps = self.heightmaps.to(device)
+        self.costmaps = self.create_costmaps(self.heightmaps, device)
         
 
-    def create_costmaps(self, heightmaps, vis=False):
+    def create_costmaps(self, heightmaps, device, vis=False):
         """
         Returns a costmap tensor, calculated from a heightmap tensor
         Current involves convolution with gaussian blur and Laplacian filter. 
@@ -48,21 +48,16 @@ class Loss:
                     ratio=4)
         g_ksize = 31
         l_ksize = 3
-        g_filt = self.create_2d_gaussian(ksize=g_ksize, sigma=3.0, vis=vis).unsqueeze(0).unsqueeze(0)
-        lap_filt = self.create_laplacian(ksize=l_ksize).unsqueeze(0).unsqueeze(0)
-
-        costmaps = torch.nn.functional.conv2d(costmaps, 
-                                                lap_filt, 
-                                                padding=int((l_ksize - 1)/2)).abs()
+        g_filt = self.create_2d_gaussian(ksize=g_ksize, sigma=3.0, vis=vis).unsqueeze(0).unsqueeze(0).to(device)
+        lap_filt = self.create_laplacian(ksize=l_ksize).unsqueeze(0).unsqueeze(0).to(device)
+        costmaps = torch.nn.functional.conv2d(costmaps, lap_filt, padding=int((l_ksize - 1)/2)).abs()
         if vis: 
             show('lap_filtered', costmaps[0, 0], ratio=0.75)
             show('lap_filtered patch', 
                 costmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
                 ratio=4.)
 
-        costmaps = torch.nn.functional.conv2d(costmaps, 
-                                                    g_filt, 
-                                                    padding=int((g_ksize - 1)/2))
+        costmaps = torch.nn.functional.conv2d(costmaps, g_filt, padding=int((g_ksize - 1)/2))
         if vis: 
             show_heat('final_costmap', costmaps[0, 0], ratio=0.75)
             show_heat('final_costmap patch', 
@@ -147,47 +142,62 @@ class Loss:
         return heights
 
 
-    def get_three_points(self, predicted_pos, map_):
+    def get_three_points(self, predicted_pos, env_idx, map_type): #TODO make env_idx a long tensor from the beginning
         """
         Takes an xyz position (z position not used though) and outputs three xyz positions (where z is the value of 
         the costmap).
         """
+        if map_type == 'height':
+            map_ = self.heightmaps
+        elif map_type == 'cost':
+            map_ = self.costmaps
+        else:
+            raise ValueError('incorrect map type given')
+        n = predicted_pos.shape[0]
+        idx_space_x = (predicted_pos[:, 0].detach() - self.x_lb) * self.mesh_res # this is shape (n,)
+        idx_space_y = (predicted_pos[:, 1].detach() - self.y_lb) * self.mesh_res # this is shape (n,)
 
-        idx_space_x = (predicted_pos[0].detach() - self.x_lb) * self.mesh_res
-        idx_space_y = (predicted_pos[1].detach() - self.y_lb) * self.mesh_res
+        x_floor = torch.floor(idx_space_x)
+        x_ceil  = torch.ceil(idx_space_x)
+        y_floor = torch.floor(idx_space_y)
+        y_ceil  = torch.ceil(idx_space_y)
 
         # following statements prevent floor(idx) and ceil(idx) from both returning idx, giving 3 points on a line.
-        # Its very rare that these conditions will be True.
-        if idx_space_x.item().is_integer():
-            idx_space_x += 0.1
-        if idx_space_y.item().is_integer():
-            idx_space_y += 0.1
+        # Its rare that these conditions will be True, but if this goes uncorrected, I will get NaNs.
+        idx_space_x[x_floor == x_ceil] += 0.1
+        idx_space_y[y_floor == y_ceil] += 0.1
 
-        output_points = torch.zeros((3, 3))
-        output_points[0, 0] = floor(idx_space_x)/self.mesh_res + self.x_lb
-        output_points[0, 1] = floor(idx_space_y)/self.mesh_res + self.y_lb
-        output_points[0, 2] = map_[floor(idx_space_x), floor(idx_space_y)]
+        # must recalculate these
+        x_floor = torch.floor(idx_space_x)
+        x_ceil  = torch.ceil(idx_space_x)
+        y_floor = torch.floor(idx_space_y)
+        y_ceil  = torch.ceil(idx_space_y)
 
-        output_points[1, 0] = ceil(idx_space_x)/self.mesh_res + self.x_lb
-        output_points[1, 1] = floor(idx_space_y)/self.mesh_res + self.y_lb
-        output_points[1, 2] = map_[ceil(idx_space_x), floor(idx_space_y)]
+        output_points = torch.zeros((n, 3, 3)).to(predicted_pos.device)
+        output_points[:, 0, 0] = x_floor/self.mesh_res + self.x_lb
+        output_points[:, 0, 1] = y_floor/self.mesh_res + self.y_lb
+        output_points[:, 0, 2] = map_[env_idx.squeeze(1).type(torch.long), x_floor.type(torch.long), y_floor.type(torch.long)]
 
-        output_points[2, 0] = ceil(idx_space_x)/self.mesh_res + self.x_lb
-        output_points[2, 1] = ceil(idx_space_y)/self.mesh_res + self.y_lb
-        output_points[2, 2] = map_[ceil(idx_space_x), ceil(idx_space_y)]
+        output_points[:, 1, 0] = x_ceil/self.mesh_res + self.x_lb
+        output_points[:, 1, 1] = y_floor/self.mesh_res + self.y_lb
+        output_points[:, 1, 2] = map_[env_idx.squeeze(1).type(torch.long), x_ceil.type(torch.long), y_floor.type(torch.long)]
 
+        output_points[:, 2, 0] = x_ceil/self.mesh_res + self.x_lb
+        output_points[:, 2, 1] = y_ceil/self.mesh_res + self.y_lb
+        output_points[:, 2, 2] = map_[env_idx.squeeze(1).type(torch.long), x_ceil.type(torch.long), y_ceil.type(torch.long)]
         return output_points
         
 
     def get_plane(self, pts):
         # I only check for the case where they are along a line parallel to the xz or yz plane. 
-        if pts[0, 0] == pts[1, 0] == pts[2, 0] or pts[0, 1] == pts[1, 1] == pts[2, 1]:
-            raise ValueError('points are in a line')
-        v1 = pts[1] - pts[0]
-        v2 = pts[2] - pts[0]
-        n = torch.cross(v1, v2)
-        d = (n * pts[0]).sum()
-        return -n[0]/n[2], -n[1]/n[2], d/n[2]
+        # if (pts[:, 0, 0] == pts[:, 1, 0] == pts[:, 2, 0]).any() or (pts[:, 0, 1] == pts[:, 1, 1] == pts[:, 2, 1]).any():
+        #     raise ValueError('points are in a line') #TODO
+        v1 = pts[:, 1] - pts[:, 0] # shape is (n, 3)
+        v2 = pts[:, 2] - pts[:, 0] # shape is (n, 3)
+        n = torch.cross(v1, v2, dim=1) # shape is (n, 3)
+        d = (n * pts[:, 0]).sum(axis=1)
+        coeffs = torch.stack((-n[:, 0]/n[:, 2], -n[:, 1]/n[:, 2], d/n[:, 2])).T
+        return coeffs
 
 
     def loss(self, 
@@ -210,57 +220,83 @@ class Loss:
         est_robot_base_height = est_robot_base_height_.clone() 
         env_idx = env_idx_.clone() 
 
-
         DELTA = 0.0
         n = pred_next_step.shape[0]
-        num_passed_test = 0
 
-        distance_loss_array = torch.zeros((n, 1))
-        terrain_loss_array = torch.zeros((n, 1))
-        height_loss_array = torch.zeros((n, 1))
+        # distance_loss_array = torch.zeros((n, 1)) #TODO is predefining these necessary?
+        # terrain_loss_array = torch.zeros((n, 1))
+        # height_loss_array = torch.zeros((n, 1))
+        
+        pred_next_step[:, 0] += x_pos.squeeze() #TODO do all three additions in one step?
+        pred_next_step[:, 1] += y_pos.squeeze()
+        pred_next_step[:, 2] += est_robot_base_height.squeeze()
 
-        for i in range(n):
-            predicted_pos = pred_next_step[i]
-            predicted_pos[0] += x_pos[i].item()
-            predicted_pos[1] += y_pos[i].item()
-            predicted_pos[2] += est_robot_base_height[i].item()
+        current_pos = foot_positions[torch.arange(n), foot.squeeze().type(torch.long)]
+        current_pos[:, 0] += x_pos.squeeze() #TODO do all three additions in one step?
+        current_pos[:, 1] += y_pos.squeeze()
+        current_pos[:, 2] += est_robot_base_height.squeeze()
 
-            # get the pos of the input foot
-            current_pos = foot_positions[i, int(foot[i])]
-            current_pos[0] += x_pos[i].item()
-            current_pos[1] += y_pos[i].item()
-            current_pos[2] += est_robot_base_height[i].item()
+        pts = self.get_three_points(pred_next_step, env_idx, map_type='cost')
+        plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
+        terrain_loss = pred_next_step[:, 0] * plane_coeffs[:, 0] + pred_next_step[:, 1] * plane_coeffs[:, 1] \
+                        + plane_coeffs[:, 2]
 
-            pts = self.get_three_points(predicted_pos, self.costmaps[int(env_idx[i].item())])
-            plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
-            terrain_loss = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
+        ideal_next_foot_pos = current_pos.clone()
+        ideal_next_foot_pos[:, 0] += step_len
+        distance_loss = torch.linalg.norm(ideal_next_foot_pos[:, :-1] - pred_next_step[:, :-1], ord=2, dim=1)
 
-            # if not (pts[:,2].min() - DELTA <= terrain_loss <= pts[:,2].max() + DELTA):
-            #     plot_plane_interpolation(pts, plane_coeffs, terrain_loss, predicted_pos)
-            #     breakpoint()
+        pts = self.get_three_points(pred_next_step, env_idx, map_type='height')
+        plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
+        actual_height = pred_next_step[:, 0] * plane_coeffs[:, 0] + pred_next_step[:, 1] * plane_coeffs[:, 1] \
+                        + plane_coeffs[:, 2]
+        height_loss = (actual_height - pred_next_step[:, 2]) * (actual_height - pred_next_step[:, 2])
 
-            ideal_next_foot_pos = current_pos.clone()
-            ideal_next_foot_pos[0] += step_len
-            distance_loss = torch.linalg.norm(ideal_next_foot_pos[:-1] - predicted_pos[:-1], ord=2)
+        if any([torch.isnan(height_loss).any(), torch.isnan(terrain_loss).any(), torch.isnan(distance_loss).any()]):
+            breakpoint()
 
-            pts = self.get_three_points(predicted_pos, self.heightmaps[int(env_idx[i].item())])
-            plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
-            actual_height = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
-            height_loss = (actual_height - predicted_pos[2]) * (actual_height - predicted_pos[2])
-            # if not (pts[:,2].min() - DELTA <= actual_height <= pts[:,2].max() + DELTA):
-            #     plot_plane_interpolation(pts, plane_coeffs, actual_height, predicted_pos)
-            #     breakpoint()
+
+        # for i in range(n):
+        #     predicted_pos = pred_next_step[i]
+        #     predicted_pos[0] += x_pos[i].item()
+        #     predicted_pos[1] += y_pos[i].item()
+        #     predicted_pos[2] += est_robot_base_height[i].item()
+
+        #     # get the pos of the input foot
+        #     current_pos = foot_positions[i, int(foot[i])]
+        #     current_pos[0] += x_pos[i].item()
+        #     current_pos[1] += y_pos[i].item()
+        #     current_pos[2] += est_robot_base_height[i].item()
+
+        #     pts = self.get_three_points(predicted_pos, self.costmaps[int(env_idx[i].item())])
+        #     plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
+        #     terrain_loss = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
+
+        #     # if not (pts[:,2].min() - DELTA <= terrain_loss <= pts[:,2].max() + DELTA):
+        #     #     plot_plane_interpolation(pts, plane_coeffs, terrain_loss, predicted_pos)
+        #     #     breakpoint()
+
+        #     ideal_next_foot_pos = current_pos.clone()
+        #     ideal_next_foot_pos[0] += step_len
+        #     distance_loss = torch.linalg.norm(ideal_next_foot_pos[:-1] - predicted_pos[:-1], ord=2)
+
+        #     pts = self.get_three_points(predicted_pos, self.heightmaps[int(env_idx[i].item())])
+        #     plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
+        #     actual_height = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
+        #     height_loss = (actual_height - predicted_pos[2]) * (actual_height - predicted_pos[2])
+        #     # if not (pts[:,2].min() - DELTA <= actual_height <= pts[:,2].max() + DELTA):
+        #     #     plot_plane_interpolation(pts, plane_coeffs, actual_height, predicted_pos)
+        #     #     breakpoint()
             
-            if torch.isnan(terrain_loss):
-                breakpoint()
+        #     if torch.isnan(terrain_loss):
+        #         breakpoint()
 
-            distance_loss_array[i] = distance_loss
-            terrain_loss_array[i] = terrain_loss
-            height_loss_array[i] = height_loss
+        #     distance_loss_array[i] = distance_loss
+        #     terrain_loss_array[i] = terrain_loss
+        #     height_loss_array[i] = height_loss
 
 
-        distance_loss_mean = distance_loss_array.mean()
-        terrain_loss_mean = terrain_loss_array.mean()
+        distance_loss_mean = distance_loss.mean()
+        terrain_loss_mean = terrain_loss.mean()
         height_loss_mean = height_loss.mean()
         
         loss = distance_loss_coefficient * distance_loss_mean \
@@ -273,8 +309,8 @@ class Loss:
 
 
     def to(self, device):
-        self.heightmaps.to(device)
-        self.costmaps.to(device)
+        self.heightmaps = self.heightmaps.to(device)
+        self.costmaps = self.costmaps.to(device)
 
         # self.mesh_res.to(device)
         # self.x_lb.to(device)
