@@ -200,8 +200,8 @@ class Loss:
             env_idx_, 
             step_len=0.2,
             distance_loss_coefficient=1.0,
-            terrain_loss_coefficient=1.0,
-            height_loss_coefficient=1.0): #TODO vectorize #TODO check that I can overfit each loss, set others to 0
+            terrain_loss_coefficient=1.0 ,
+            height_loss_coefficient=1.0): #TODO vectorize 
         
         foot_positions = foot_positions_.clone() 
         foot = foot_.clone()
@@ -241,7 +241,7 @@ class Loss:
 
             ideal_next_foot_pos = current_pos.clone()
             ideal_next_foot_pos[0] += step_len
-            distance_loss = torch.linalg.norm(ideal_next_foot_pos - predicted_pos, ord=2)
+            distance_loss = torch.linalg.norm(ideal_next_foot_pos[:-1] - predicted_pos[:-1], ord=2)
 
             pts = self.get_three_points(predicted_pos, self.heightmaps[int(env_idx[i].item())])
             plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
@@ -264,8 +264,8 @@ class Loss:
         height_loss_mean = height_loss.mean()
         
         loss = distance_loss_coefficient * distance_loss_mean \
-                    + terrain_loss_coefficient * terrain_loss_mean \
-                    + height_loss_coefficient * height_loss_mean
+                + terrain_loss_coefficient * terrain_loss_mean \
+                + height_loss_coefficient * height_loss_mean
         info = {'distance_loss': distance_loss_mean.item(),
                 'terrain_loss': terrain_loss_mean.item(),
                 'height_loss': height_loss_mean.item()}
@@ -344,7 +344,7 @@ def show_heat(name, img, ratio=4):
     cv2.imshow(name, heatmap)
 
 
-def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, vis=False): #TODO pass the env idx to this as well.
+def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, vis=False):
     """
     terrain_bounds should be [x_lb, x_ub, y_lb, y_ub]. Assumes bounds are rectangular.
     mesh_res is points per m
