@@ -129,7 +129,6 @@ class Aliengo:
 
     
     def get_hutter_teacher_pmtg_observation_bounds(self):
-        # breakpoint()
         obs_lb, obs_ub = self.get_hutter_pmtg_observation_bounds()
         info_lb, info_ub = self.get_privileged_info_bounds()
         return np.concatenate((obs_lb, info_lb)), np.concatenate((obs_ub, info_ub))

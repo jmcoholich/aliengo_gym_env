@@ -11,9 +11,11 @@ from loss import Loss
 
 
 N_ENVS = 2
-NUM_X = 2 # number of footstep placements along x direction, per env
-NUM_Y = 2 # number of footstep placements along y direction, per env
-# np.random.seed(1)
+NUM_X = 20 # number of footstep placements along x direction, per env
+NUM_Y = 20 # number of footstep placements along y direction, per env
+EPOCHS = 10
+LR = 1e-4
+np.random.seed(1)
 
 '''
 TODO add noise to the observations
@@ -23,8 +25,8 @@ TODO add wandb
 
 
 def main():
-    device = 'cpu'
-    epochs = 10
+    device = 'cuda'
+    epochs = EPOCHS
 
 
     # Data Generation ##################################################################################################
@@ -51,6 +53,7 @@ def main():
     # Training #########################################################################################################
     # initialize loss object
     loss = Loss(envs, device)
+    loss.to(device)
     del envs
 
     x_pos = torch.from_numpy(x_pos).type(torch.float32).to(device)
@@ -69,19 +72,22 @@ def main():
     agent = TerrainAgent(means=means, stds=stds).to(device)
     
     # initialize optimizer 
-    optimizer = torch.optim.Adam(agent.parameters()) # just use default lr for now
+    optimizer = torch.optim.Adam(agent.parameters(), lr=LR)
 
     # train
-    for _ in range(epochs):
+    for i in range(epochs):
         optimizer.zero_grad()
         pred_next_step = agent(foot_positions, foot, heightmaps)
+        print()
+        print(pred_next_step.detach().numpy().mean(axis=0))
+        print(pred_next_step.detach().numpy().max(axis=0))
+        print(pred_next_step.detach().numpy().min(axis=0))
+        print()
         loss_ = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx)
         loss_.backward()
         optimizer.step()
+        print('#' * 100 + '\nFinished epoch {}'.format(i) + '#' * 100)
 
-
-
-    # backward pass   
 
 if __name__ == '__main__':
     main()

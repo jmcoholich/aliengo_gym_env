@@ -7,15 +7,18 @@ import cv2
 import matplotlib.pyplot as plt
 import sys
 import torch
+from math import floor, ceil
 
 class Loss:
     def __init__(self, envs, device, mesh_res=50, rayFromZ=100.): #TODO up mesh_res to 100, but need to change the loss params
         # generate and store heightmap of all envs
         self.mesh_res = mesh_res
-        self.x_lb = -2.0
-        self.x_ub = envs[0].terrain_length + 2.0
-        self.y_lb = -envs[0].terrain_width/2.0 - 0.5
-        self.y_ub = envs[0].terrain_width/2.0 + 0.5
+
+        extra_padding = 2.0 # in meters
+        self.x_lb = -2.0 - extra_padding
+        self.x_ub = envs[0].terrain_length + 2.0 + extra_padding
+        self.y_lb = -envs[0].terrain_width/2.0 - 0.5 - extra_padding
+        self.y_ub = envs[0].terrain_width/2.0 + 0.5 + extra_padding
         self.num_x = int((self.x_ub - self.x_lb) * self.mesh_res + 1) # per env
         self.num_y = int((self.y_ub - self.y_lb) * self.mesh_res + 1) # per env
 
@@ -23,54 +26,56 @@ class Loss:
         self.heightmaps = torch.zeros((n_envs, self.num_x, self.num_y))
         for i in range(n_envs): # this can't be vectorized due to use of pybullet.getRayTestBatch()
             self.heightmaps[i] = torch.from_numpy(self.get_heightmap(envs[i], rayFromZ))
-        self.to(device)
-        self.convert_heightmaps_to_costmaps()
+        self.heightmaps.to(device)
+        self.costmaps = self.create_costmaps(self.heightmaps)
         
 
-    def convert_heightmaps_to_costmaps(self, vis=False):
+    def create_costmaps(self, heightmaps, vis=False):
         """
-        Converts a grid of heights to a terrain costmap.
+        Returns a costmap tensor, calculated from a heightmap tensor
         Current involves convolution with gaussian blur and Laplacian filter. 
         Zero pad the image (presumably, the heightmap covers the edges of the terrian, beyond which everything is zero
         elevation anyways.)
         """
         assert self.mesh_res == 50 #TODO generalize gaussian filter params to different mesh resolutions 
-        self.heightmaps = self.heightmaps.unsqueeze(1)
+        costmaps = heightmaps.unsqueeze(1).detach().clone() # add channel dimension. I think detach() is superfluous
         if vis: 
-            pch_i = [self.heightmaps.shape[2]//2, self.heightmaps.shape[3]//2] # patch indices
+            pch_i = [costmaps.shape[2]//2, costmaps.shape[3]//2] # patch indices
             pch_s = 75
-            show('raw heightmap', self.heightmaps[0, 0], ratio=0.75)
+            show('raw heightmap', costmaps[0, 0], ratio=0.75)
             show('raw heightmap patch', 
-                    self.heightmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
+                    costmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
                     ratio=4)
         g_ksize = 31
         l_ksize = 3
         g_filt = self.create_2d_gaussian(ksize=g_ksize, sigma=3.0, vis=vis).unsqueeze(0).unsqueeze(0)
         lap_filt = self.create_laplacian(ksize=l_ksize).unsqueeze(0).unsqueeze(0)
 
-        self.heightmaps = torch.nn.functional.conv2d(self.heightmaps, 
+        costmaps = torch.nn.functional.conv2d(costmaps, 
                                                 lap_filt, 
                                                 padding=int((l_ksize - 1)/2)).abs()
         if vis: 
-            show('lap_filtered', self.heightmaps[0, 0], ratio=0.75)
+            show('lap_filtered', costmaps[0, 0], ratio=0.75)
             show('lap_filtered patch', 
-                self.heightmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
+                costmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
                 ratio=4.)
 
-        self.heightmaps = torch.nn.functional.conv2d(self.heightmaps, 
+        costmaps = torch.nn.functional.conv2d(costmaps, 
                                                     g_filt, 
                                                     padding=int((g_ksize - 1)/2))
         if vis: 
-            show_heat('final_costmap', self.heightmaps[0, 0], ratio=0.75)
+            show_heat('final_costmap', costmaps[0, 0], ratio=0.75)
             show_heat('final_costmap patch', 
-                        self.heightmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
+                        costmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
                         ratio=4.)
         
-        self.heightmaps = self.heightmaps.squeeze()
+        costmaps = costmaps.squeeze()
         
         if vis: 
             cv2.waitKey(0)
             cv2.destroyAllWindows()
+
+        return costmaps
 
 
     def create_laplacian(self, ksize):
@@ -79,6 +84,7 @@ class Loss:
         return torch.Tensor([   [0., 1., 0.],
                                 [1., -4., 1.],
                                 [0., 1., 0.]])
+
 
     def create_2d_gaussian(self, ksize, sigma, vis=False):
         if ksize%2 == 0: raise ValueError('square kernel size must be odd')
@@ -93,7 +99,7 @@ class Loss:
         return x 
 
     
-    def get_heightmap(self, env, rayFromZ, vis=True): #TODO vis
+    def get_heightmap(self, env, rayFromZ, vis=False):
         # NOTE if the env is not AliengoSteps, this will throw an error
 
         max_batch_size = int(1e4 + 6e3) # this is the approx max number of rays you can do at a time with rayTestBatch
@@ -141,48 +147,98 @@ class Loss:
         return heights
 
 
-    def loss(self, pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx): #TODO vectorize
+    def get_three_points(self, predicted_pos, map_):
+        """
+        Takes an xyz position (z position not used though) and outputs three xyz positions (where z is the value of 
+        the costmap).
+        """
+
+        idx_space_x = (predicted_pos[0] - self.x_lb) * self.mesh_res
+        idx_space_y = (predicted_pos[1] - self.y_lb) * self.mesh_res
+
+        output_points = torch.zeros((3, 3))
+        output_points[0, 0] = floor(idx_space_x)/self.mesh_res + self.x_lb
+        output_points[0, 1] = floor(idx_space_y)/self.mesh_res + self.y_lb
+        output_points[0, 2] = map_[floor(idx_space_x), floor(idx_space_y)]
+
+        output_points[1, 0] = ceil(idx_space_x)/self.mesh_res + self.x_lb
+        output_points[1, 1] = floor(idx_space_y)/self.mesh_res + self.y_lb
+        output_points[1, 2] = map_[ceil(idx_space_x), floor(idx_space_y)]
+
+        output_points[2, 0] = ceil(idx_space_x)/self.mesh_res + self.x_lb
+        output_points[2, 1] = ceil(idx_space_y)/self.mesh_res + self.y_lb
+        output_points[2, 2] = map_[ceil(idx_space_x), ceil(idx_space_y)]
+
+        return output_points
+        
+
+    def get_plane(self, pts):
+        v1 = pts[1] - pts[0]
+        v2 = pts[2] - pts[0]
+        n = torch.cross(v1, v2)
+        d = (n * pts[0]).sum()
+        return -n[0]/n[2], -n[1]/n[2], d/n[2]
+
+
+    def loss(self, 
+            pred_next_step, 
+            foot_positions, 
+            foot, 
+            x_pos,
+            y_pos, 
+            est_robot_base_height, 
+            env_idx, 
+            step_len=0.2,
+            distance_loss_coefficient=1.0,
+            terrain_loss_coefficient=1.0,
+            height_loss_coefficient=10.0): #TODO vectorize
         n = pred_next_step.shape[0]
         num_passed_test = 0
+        loss = torch.zeros((n, 1))
+
         for i in range(n):
-            # get the xy of the input foot
-            current_xyz = foot_positions[i, int(foot[i])]
-            current_xyz[0] += x_pos[i].item()
-            current_xyz[1] += y_pos[i].item()
-            current_xyz[2] += est_robot_base_height[i].item()
+            predicted_pos = pred_next_step[i]
+            predicted_pos[0] += x_pos[i].item()
+            predicted_pos[1] += y_pos[i].item()
+            predicted_pos[2] += est_robot_base_height[i].item()
 
-            # convert this xy position to an index of the heights array.
-            x_idx = int(torch.round((current_xyz[0] - self.x_lb) * self.mesh_res))
-            y_idx = int(torch.round((current_xyz[1] - self.y_lb) * self.mesh_res))
-            if x_idx > self.num_x - 1 or y_idx > self.num_y - 1:
-                raise ValueError('The indices of the loss heightfield are out of bounds.'
-                ' Try increasing bounds of heightfield or check for bugs')
+            # get the pos of the input foot
+            current_pos = foot_positions[i, int(foot[i])]
+            current_pos[0] += x_pos[i].item()
+            current_pos[1] += y_pos[i].item()
+            current_pos[2] += est_robot_base_height[i].item()
 
-            closest_mesh_xyz = torch.Tensor(3)
-            closest_mesh_xyz[0] = x_idx/self.mesh_res + self.x_lb
-            closest_mesh_xyz[1] = y_idx/self.mesh_res + self.y_lb
-            closest_mesh_xyz[2] = self.heightmaps[int(env_idx[i])][x_idx, y_idx]
+            pts = self.get_three_points(predicted_pos, self.costmaps[int(env_idx[i].item())])
+            plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
+            terrain_loss = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
 
-            if abs(closest_mesh_xyz[2] - current_xyz[2]) < 1e-3: num_passed_test += 1
+            ideal_next_foot_pos = current_pos.clone()
+            ideal_next_foot_pos[0] += step_len
+            distance_loss = -torch.linalg.norm(ideal_next_foot_pos - predicted_pos, ord=2)
 
-            # assert the closest mesh point is not more than square diag away 
-            max_dist = 1.0/self.mesh_res * (2**0.5)/2.0
-            dist = ((current_xyz[0] - closest_mesh_xyz[0])**2 + (current_xyz[1] - closest_mesh_xyz[1])**2)**0.5
-            assert dist <= max_dist, '{} percent higher than max dist'.format((dist-max_dist)/max_dist * 100)
-            # get the costmap surrounding it
-        print('{} percent passes z-matching test for {} datapoints'.format(float(num_passed_test)/n), n)
+            pts = self.get_three_points(predicted_pos, self.heightmaps[int(env_idx[i].item())])
+            plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
+            actual_height = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
+            height_loss = -(actual_height - predicted_pos[2]) * (actual_height - predicted_pos[2])
+            
+            loss[i] = distance_loss_coefficient * distance_loss \
+                        + terrain_loss_coefficient * terrain_loss \
+                        + height_loss_coefficient * height_loss
+ 
+        return loss.mean()
 
-
-    # def get_costmap(self, x_idx, y_idx, env_idx):
-    #     # get 
-    #     pass
-
-        
 
     def to(self, device):
         self.heightmaps.to(device)
+        self.costmaps.to(device)
 
-
+        # self.mesh_res.to(device)
+        # self.x_lb.to(device)
+        # self.x_ub.to(device)
+        # self.y_lb.to(device)
+        # self.y_ub.to(device)
+        # self.num_x.to(device)
+        # self.num_y.to(device)
 
 
 def norm(img):
