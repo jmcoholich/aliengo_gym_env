@@ -69,7 +69,7 @@ class Loss:
                         costmaps[0, 0, pch_i[0]:pch_i[0] + pch_s, pch_i[1]:pch_i[1] + pch_s], 
                         ratio=4.)
         
-        costmaps = costmaps.squeeze()
+        costmaps = costmaps.squeeze(1)
         
         if vis: 
             cv2.waitKey(0)
@@ -153,8 +153,15 @@ class Loss:
         the costmap).
         """
 
-        idx_space_x = (predicted_pos[0] - self.x_lb) * self.mesh_res
-        idx_space_y = (predicted_pos[1] - self.y_lb) * self.mesh_res
+        idx_space_x = (predicted_pos[0].detach() - self.x_lb) * self.mesh_res
+        idx_space_y = (predicted_pos[1].detach() - self.y_lb) * self.mesh_res
+
+        # following statements prevent floor(idx) and ceil(idx) from both returning idx, giving 3 points on a line.
+        # Its very rare that these conditions will be True.
+        if idx_space_x.item().is_integer():
+            idx_space_x += 0.1
+        if idx_space_y.item().is_integer():
+            idx_space_y += 0.1
 
         output_points = torch.zeros((3, 3))
         output_points[0, 0] = floor(idx_space_x)/self.mesh_res + self.x_lb
@@ -173,6 +180,9 @@ class Loss:
         
 
     def get_plane(self, pts):
+        # I only check for the case where they are along a line parallel to the xz or yz plane. 
+        if pts[0, 0] == pts[1, 0] == pts[2, 0] or pts[0, 1] == pts[1, 1] == pts[2, 1]:
+            raise ValueError('points are in a line')
         v1 = pts[1] - pts[0]
         v2 = pts[2] - pts[0]
         n = torch.cross(v1, v2)
@@ -182,19 +192,32 @@ class Loss:
 
     def loss(self, 
             pred_next_step, 
-            foot_positions, 
-            foot, 
-            x_pos,
-            y_pos, 
-            est_robot_base_height, 
-            env_idx, 
+            foot_positions_, 
+            foot_, 
+            x_pos_,
+            y_pos_, 
+            est_robot_base_height_, 
+            env_idx_, 
             step_len=0.2,
             distance_loss_coefficient=1.0,
             terrain_loss_coefficient=1.0,
-            height_loss_coefficient=10.0): #TODO vectorize
+            height_loss_coefficient=1.0): #TODO vectorize #TODO check that I can overfit each loss, set others to 0
+        
+        foot_positions = foot_positions_.clone() 
+        foot = foot_.clone()
+        x_pos = x_pos_.clone()
+        y_pos = y_pos_.clone() 
+        est_robot_base_height = est_robot_base_height_.clone() 
+        env_idx = env_idx_.clone() 
+
+
+        DELTA = 0.0
         n = pred_next_step.shape[0]
         num_passed_test = 0
-        loss = torch.zeros((n, 1))
+
+        distance_loss_array = torch.zeros((n, 1))
+        terrain_loss_array = torch.zeros((n, 1))
+        height_loss_array = torch.zeros((n, 1))
 
         for i in range(n):
             predicted_pos = pred_next_step[i]
@@ -212,20 +235,41 @@ class Loss:
             plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
             terrain_loss = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
 
+            # if not (pts[:,2].min() - DELTA <= terrain_loss <= pts[:,2].max() + DELTA):
+            #     plot_plane_interpolation(pts, plane_coeffs, terrain_loss, predicted_pos)
+            #     breakpoint()
+
             ideal_next_foot_pos = current_pos.clone()
             ideal_next_foot_pos[0] += step_len
-            distance_loss = -torch.linalg.norm(ideal_next_foot_pos - predicted_pos, ord=2)
+            distance_loss = torch.linalg.norm(ideal_next_foot_pos - predicted_pos, ord=2)
 
             pts = self.get_three_points(predicted_pos, self.heightmaps[int(env_idx[i].item())])
             plane_coeffs = self.get_plane(pts) # x coeff, y coeff, constant term
             actual_height = predicted_pos[0] * plane_coeffs[0] + predicted_pos[1] * plane_coeffs[1] + plane_coeffs[2]
-            height_loss = -(actual_height - predicted_pos[2]) * (actual_height - predicted_pos[2])
+            height_loss = (actual_height - predicted_pos[2]) * (actual_height - predicted_pos[2])
+            # if not (pts[:,2].min() - DELTA <= actual_height <= pts[:,2].max() + DELTA):
+            #     plot_plane_interpolation(pts, plane_coeffs, actual_height, predicted_pos)
+            #     breakpoint()
             
-            loss[i] = distance_loss_coefficient * distance_loss \
-                        + terrain_loss_coefficient * terrain_loss \
-                        + height_loss_coefficient * height_loss
- 
-        return loss.mean()
+            if torch.isnan(terrain_loss):
+                breakpoint()
+
+            distance_loss_array[i] = distance_loss
+            terrain_loss_array[i] = terrain_loss
+            height_loss_array[i] = height_loss
+
+
+        distance_loss_mean = distance_loss_array.mean()
+        terrain_loss_mean = terrain_loss_array.mean()
+        height_loss_mean = height_loss.mean()
+        
+        loss = distance_loss_coefficient * distance_loss_mean \
+                    + terrain_loss_coefficient * terrain_loss_mean \
+                    + height_loss_coefficient * height_loss_mean
+        info = {'distance_loss': distance_loss_mean.item(),
+                'terrain_loss': terrain_loss_mean.item(),
+                'height_loss': height_loss_mean.item()}
+        return loss, info
 
 
     def to(self, device):
@@ -239,6 +283,40 @@ class Loss:
         # self.y_ub.to(device)
         # self.num_x.to(device)
         # self.num_y.to(device)
+
+
+def plot_plane_interpolation(pts, plane_coeffs, terrain_loss, predicted_pos):
+    import matplotlib.pyplot
+    
+    # point  = np.array([1, 2, 3])
+    # normal = np.array([1, 1, 2])
+
+
+    # a plane is a*x+b*y+c*z+d=0
+    # [a,b,c] is the normal. Thus, we have to calculate
+    # d and we're set
+    # d = -point.dot(normal)
+    pts             =  pts.detach().numpy()          
+    plane_coeffs    =  plane_coeffs
+    terrain_loss    =  terrain_loss.detach().numpy()   
+    predicted_pos   =  predicted_pos.detach().numpy()
+    # create x,y    
+    xx, yy = np.meshgrid(np.linspace(pts[:,0].min(), pts[:,0].max(), 10),
+                         np.linspace(pts[:,1].min(), pts[:,1].max(), 10))
+
+    # calculate corresponding z
+    z = plane_coeffs[0].item()* xx + plane_coeffs[1].item() * yy + plane_coeffs[2].item()
+    # plot the surface
+    plt3d = plt.figure().gca(projection='3d')
+    plt3d.plot_surface(xx, yy, z, alpha=0.2)
+
+    # Ensure that the next plot doesn't overwrite the first plot
+    ax = plt.gca()
+    # ax.hold(True)
+    for i in range(3):
+        ax.scatter(pts[i, 0], pts[i, 1],pts[i, 2], color='green')
+    ax.scatter(predicted_pos[0], predicted_pos[1], terrain_loss, color='red')
+    plt.show()
 
 
 def norm(img):
@@ -325,6 +403,7 @@ def create_costmap(fake_client, foot_pos, terrain_max_height=100, mesh_res=100, 
 
 
 if __name__ == '__main__':
+    plot_plane_interpolation(None, None, None)
     import gym
     np.random.seed(1)
     env = gym.make('gym_aliengo:AliengoSteps-v0', render=False)

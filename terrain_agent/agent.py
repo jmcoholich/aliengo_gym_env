@@ -21,9 +21,10 @@ class TerrainAgent(nn.Module):
 
     def forward(self, foot_positions, foot, heightmap):
         # first normalize
-        foot_positions = (foot_positions - self.means[0])/(self.stds[0] + 1e-5)
-        foot = (foot - self.means[1])/(self.stds[1] + 1e-5)
-        heightmap = (heightmap - self.means[2])/(self.stds[2] + 1e-5)
+        EPS = 1e-2
+        foot_positions = (foot_positions - self.means[0])/(self.stds[0] + EPS) 
+        foot = (foot - self.means[1])/(self.stds[1] + EPS)
+        heightmap = (heightmap - self.means[2])/(self.stds[2] + EPS)
         
         assert foot_positions.shape[0] == foot.shape[0] == heightmap.shape[0] # batch sizes are all the same
         n = foot_positions.shape[0]

@@ -10,12 +10,14 @@ from agent import TerrainAgent
 from loss import Loss
 
 
-N_ENVS = 2
+N_ENVS = 1
 NUM_X = 20 # number of footstep placements along x direction, per env
 NUM_Y = 20 # number of footstep placements along y direction, per env
-EPOCHS = 10
-LR = 1e-4
+EPOCHS = 100
+LR = 1e-3
+MAX_GRAD_NORM = 2.0
 np.random.seed(1)
+torch.manual_seed(1)
 
 '''
 TODO add noise to the observations
@@ -25,7 +27,7 @@ TODO add wandb
 
 
 def main():
-    device = 'cuda'
+    device = 'cpu'
     epochs = EPOCHS
 
 
@@ -68,6 +70,7 @@ def main():
     heightmaps = torch.from_numpy(heightmaps).unsqueeze(1).type(torch.float32).to(device) # add channel dimension of 1
 
     means = [foot_positions.mean(axis=0, keepdims=True), foot.mean(), heightmaps.mean()]
+    if foot.shape[0] == 1: raise RuntimeError('batch size must be greater than one in order to calculate std')
     stds = [foot_positions.std(axis=0, keepdims=True), foot.std(), heightmaps.std()]
     agent = TerrainAgent(means=means, stds=stds).to(device)
     
@@ -77,16 +80,42 @@ def main():
     # train
     for i in range(epochs):
         optimizer.zero_grad()
+
+        foot_positions_ = foot_positions.clone()
+        foot_ = foot.clone()
+        heightmaps_ = heightmaps.clone()
+
         pred_next_step = agent(foot_positions, foot, heightmaps)
+
+        assert (foot_positions_ == foot_positions).all()
+        assert (foot_ == foot).all()
+        assert (heightmaps_ == heightmaps).all()
+
+
         print()
-        print(pred_next_step.detach().numpy().mean(axis=0))
-        print(pred_next_step.detach().numpy().max(axis=0))
-        print(pred_next_step.detach().numpy().min(axis=0))
+        print('NN output mean, max, min')
+        print(pred_next_step.cpu().detach().numpy().mean(axis=0))
+        print(pred_next_step.cpu().detach().numpy().max(axis=0))
+        print(pred_next_step.cpu().detach().numpy().min(axis=0))
         print()
-        loss_ = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx)
+
+        # stuff = [pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx]
+        # stuff_ = [None] * len(stuff)
+        # for i in range(len(stuff)):
+        #     stuff_[i] = stuff[i].clone()
+        
+        loss_, info = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx) 
+
+        # for i in range(1, len(stuff)):
+        #     if not (stuff_[i] == stuff[i]).all():
+        #         breakpoint()
+
+        print('Gradient norm is {}'.format(torch.linalg.norm(torch.nn.utils.parameters_to_vector(agent.parameters()))))
+        torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=MAX_GRAD_NORM)
+        print(info)
         loss_.backward()
         optimizer.step()
-        print('#' * 100 + '\nFinished epoch {}'.format(i) + '#' * 100)
+        print('#' * 100 + '\nFinished epoch {}\n'.format(i) + '#' * 100)
 
 
 if __name__ == '__main__':
