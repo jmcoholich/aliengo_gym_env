@@ -83,16 +83,8 @@ def main():
         start = time.time()
         optimizer.zero_grad()
 
-        # foot_positions_ = foot_positions.clone()
-        # foot_ = foot.clone()
-        # heightmaps_ = heightmaps.clone()
         a = time.time()
         pred_next_step = agent(foot_positions, foot, heightmaps)
-
-        # assert (foot_positions_ == foot_positions).all()
-        # assert (foot_ == foot).all()
-        # assert (heightmaps_ == heightmaps).all()
-
 
         print()
         print('NN output mean, max, min')
@@ -101,16 +93,9 @@ def main():
         print(pred_next_step.cpu().detach().numpy().min(axis=0))
         print()
 
-        # stuff = [pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx]
-        # stuff_ = [None] * len(stuff)
-        # for i in range(len(stuff)):
-        #     stuff_[i] = stuff[i].clone()
         b = time.time()
         loss_, info = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx) 
 
-        # for i in range(1, len(stuff)):
-        #     if not (stuff_[i] == stuff[i]).all():
-        #         breakpoint()
         asdf = time.time()
         print('Gradient norm is {}'.format(torch.linalg.norm(torch.nn.utils.parameters_to_vector(agent.parameters()))))
         torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=MAX_GRAD_NORM)
