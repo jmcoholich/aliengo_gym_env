@@ -1,0 +1,24 @@
+{
+    "os": "Linux-5.8.0-44-generic-x86_64-with-debian-bullseye-sid",
+    "python": "3.7.9",
+    "heartbeatAt": "2021-02-28T20:17:17.095758",
+    "startedAt": "2021-02-28T20:17:16.535388",
+    "docker": null,
+    "gpu": "GeForce RTX 2060 SUPER",
+    "gpu_count": 1,
+    "cpu_count": 16,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "codePath": "terrain_agent/main.py",
+    "program": "main.py",
+    "git": {
+        "remote": "git@github.gatech.edu:jcoholich3/gym-aliengo.git",
+        "commit": "57749d3dfd099fed1eacb620de7bdc2a806bbbe3"
+    },
+    "email": "jcoholich@gatech.edu",
+    "root": "/home/jeremiah/gym-aliengo",
+    "host": "jeremiah-desktop",
+    "username": "jeremiah",
+    "executable": "/home/jeremiah/anaconda3/envs/kostrikov/bin/python"
+}

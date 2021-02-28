@@ -5,29 +5,53 @@ import gym
 import time
 import os 
 import matplotlib.pyplot as plt
+import time
+import wandb
+
 from observation import get_observation
 from agent import TerrainAgent
 from loss import Loss
+from eval_agent import eval_agent
 
 
 N_ENVS = 2
 NUM_X = 20 # number of footstep placements along x direction, per env
 NUM_Y = 20 # number of footstep placements along y direction, per env
-EPOCHS = 1000
+N_ENVS_TEST = 3
+NUM_X_TEST = 10
+NUM_Y_TEST = 10
+EPOCHS = 10000
 LR = 3e-5
 MAX_GRAD_NORM = 2.0
-np.random.seed(1)
-torch.manual_seed(1)
+WANDB_PROJECT = 'terrain_agent_pretrain'
+SEED = 1
+DEVICE = 'cuda'
+ENV = 'gym_aliengo:AliengoSteps-v0'
+TERRAIN_LOSS_COEFF = 10.0
+HEIGHT_LOSS_COEFF = 1.0
+DISTANCE_LOSS_COEFF = 1.0
+VERBOSE = False
+EVAL_INTERVAL = 5
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
 
 '''
 TODO add noise to the observations
 TODO switch to an nn that outputs a mean and std to sample from, so that I can train this with PPO instead.
-TODO add wandb
+TODO implement minibatches
 '''
 
 
 def main():
-    device = 'cuda'
+    start_time = time.time()
+    config = {'n_envs': N_ENVS, 'num_x': NUM_X, 'num_y': NUM_Y, 'epochs': EPOCHS, 'lr': LR, 
+                'max_grad_norm:': MAX_GRAD_NORM, 'seed': SEED, 'device': DEVICE, 'env': ENV, 
+                'distance_loss_coefficient': DISTANCE_LOSS_COEFF, 'height_loss_coefficient': HEIGHT_LOSS_COEFF, 
+                'terrain_loss_coefficient':TERRAIN_LOSS_COEFF, 'eval_interval': EVAL_INTERVAL, 
+                'n_envs_test': N_ENVS_TEST, 'num_x_test':NUM_X_TEST, 'num_y_test'} #TODO finish this shit
+    wandb.init(project=WANDB_PROJECT, config=config)
+    device = DEVICE
     epochs = EPOCHS
 
 
@@ -35,7 +59,7 @@ def main():
     # create several envs of varying difficulty
     envs = [''] * N_ENVS
     for i in range(len(envs)):
-        envs[i] = gym.make('gym_aliengo:AliengoSteps-v0', # NOTE changing env type will break code
+        envs[i] = gym.make(ENV, # NOTE changing env type will break code
                         rows_per_m=np.random.uniform(1.0, 5.0),
                         terrain_height_range=np.random.uniform(0.0, 0.375), render=False,
                         fixed=True,
@@ -74,49 +98,61 @@ def main():
     if foot.shape[0] == 1: raise RuntimeError('batch size must be greater than one in order to calculate std')
     stds = [foot_positions.std(axis=0, keepdims=True), foot.std(), heightmaps.std()]
     agent = TerrainAgent(means=means, stds=stds).to(device)
+    wandb.watch(agent)
     
     # initialize optimizer 
     optimizer = torch.optim.Adam(agent.parameters(), lr=LR)
 
     # train
     for i in range(epochs):
-        start = time.time()
+
+        if VERBOSE: start = time.time()
         optimizer.zero_grad()
 
         a = time.time()
         pred_next_step = agent(foot_positions, foot, heightmaps)
+        
+        if VERBOSE:
+            print()
+            print('NN output mean, max, min')
+            print(pred_next_step.cpu().detach().numpy().mean(axis=0))
+            print(pred_next_step.cpu().detach().numpy().max(axis=0))
+            print(pred_next_step.cpu().detach().numpy().min(axis=0))
+            print()
 
-        print()
-        print('NN output mean, max, min')
-        print(pred_next_step.cpu().detach().numpy().mean(axis=0))
-        print(pred_next_step.cpu().detach().numpy().max(axis=0))
-        print(pred_next_step.cpu().detach().numpy().min(axis=0))
-        print()
+        if VERBOSE: b = time.time()
+        loss_, info = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx,
+                        terrain_loss_coefficient=TERRAIN_LOSS_COEFF, distance_loss_coefficient=DISTANCE_LOSS_COEFF,
+                        height_loss_coefficient=HEIGHT_LOSS_COEFF) 
 
-        b = time.time()
-        loss_, info = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx) 
-
-        asdf = time.time()
-        print('Gradient norm is {}'.format(torch.linalg.norm(torch.nn.utils.parameters_to_vector(agent.parameters()))))
+        if VERBOSE: asdf = time.time()
+        if VERBOSE:
+            print('Gradient norm is {}'.format(torch.linalg.norm(torch.nn.utils.parameters_to_vector(agent.parameters()))))
         torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=MAX_GRAD_NORM)
-        print(info)
-        c = time.time()
+        if VERBOSE: print(info)
+        if VERBOSE: c = time.time()
         loss_.backward()
-        d = time.time()
+        if VERBOSE: d = time.time()
         optimizer.step()
-        print('#' * 100 + '\nFinished epoch {}\n'.format(i) + '#' * 100)
+        if VERBOSE: print('#' * 100 + '\nFinished epoch {}\n'.format(i) + '#' * 100)
         e = time.time()
+        info.update({'min_wall_time': (e - start_time)/60., 'epoch': i})
+        if VERBOSE:
+            print()
+            print('zero grad time: {:.4f}'.format(a-start))
+            print('fwd pass time: {:.4f}'.format(b-a))
+            print('loss time: {:.4f}'.format(asdf-b))
+            print('clip grad time: {:.4f}'.format(c-asdf))
+            print('backwards pass time: {:.4f}'.format(d-c))
+            print('optimizer step time: {:.4f}'.format(e-d))
 
 
-        print()
-        print('zero grad time: {}'.format(a-start))
-        print('fwd pass time: {}'.format(b-a))
-        print('loss time: {}'.format(asdf-b))
-        print('clip grad time: {}'.format(c-asdf))
-        print('backwards pass time: {}'.format(d-c))
-        print('optimizer step time: {}'.format(e-d))
+        if i%5 == 0:
+            test_losses = eval_agent(agent, config)
 
-
+            info.update(test_losses)
+        
+        wandb.log(info)
 if __name__ == '__main__':
     main()
 

@@ -1,0 +1,46 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.10.12
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.7.9
+device:
+  desc: null
+  value: cuda
+distance_loss_coefficient:
+  desc: null
+  value: 1.0
+env:
+  desc: null
+  value: gym_aliengo:AliengoSteps-v0
+epochs:
+  desc: null
+  value: 10000
+height_loss_coefficient:
+  desc: null
+  value: 1.0
+lr:
+  desc: null
+  value: 3.0e-05
+'max_grad_norm:':
+  desc: null
+  value: 2.0
+n_envs:
+  desc: null
+  value: 2
+num_x:
+  desc: null
+  value: 20
+num_y:
+  desc: null
+  value: 20
+seed:
+  desc: null
+  value: 1
+terrain_loss_coefficient:
+  desc: null
+  value: 10.0
