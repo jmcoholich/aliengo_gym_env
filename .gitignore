@@ -4,7 +4,7 @@
 *.png
 *.zip
 .vscode/
-
+terrain_agent/wandb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
