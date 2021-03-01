@@ -20,7 +20,7 @@ NUM_Y = 20 # number of footstep placements along y direction, per env
 N_ENVS_TEST = 3
 NUM_X_TEST = 10
 NUM_Y_TEST = 10
-EPOCHS = 10000
+EPOCHS = 100
 LR = 3e-5
 MAX_GRAD_NORM = 2.0
 WANDB_PROJECT = 'terrain_agent_pretrain'
@@ -40,16 +40,21 @@ torch.manual_seed(SEED)
 TODO add noise to the observations
 TODO switch to an nn that outputs a mean and std to sample from, so that I can train this with PPO instead.
 TODO implement minibatches
+TODO generate large test set in advance
 '''
 
 
 def main():
     start_time = time.time()
+    heightmap_params = {'length': 1.25, # TODO allow rectangular
+                        'robot_position': 0.5, 
+                        'grid_spacing': 1.0/64.0}
     config = {'n_envs': N_ENVS, 'num_x': NUM_X, 'num_y': NUM_Y, 'epochs': EPOCHS, 'lr': LR, 
                 'max_grad_norm:': MAX_GRAD_NORM, 'seed': SEED, 'device': DEVICE, 'env': ENV, 
                 'distance_loss_coefficient': DISTANCE_LOSS_COEFF, 'height_loss_coefficient': HEIGHT_LOSS_COEFF, 
                 'terrain_loss_coefficient':TERRAIN_LOSS_COEFF, 'eval_interval': EVAL_INTERVAL, 
-                'n_envs_test': N_ENVS_TEST, 'num_x_test':NUM_X_TEST, 'num_y_test'} #TODO finish this shit
+                'n_envs_test': N_ENVS_TEST, 'num_x_test':NUM_X_TEST, 'num_y_test':NUM_Y_TEST, 'env': ENV, 
+                'heightmap_params':heightmap_params} 
     wandb.init(project=WANDB_PROJECT, config=config)
     device = DEVICE
     epochs = EPOCHS
@@ -67,9 +72,6 @@ def main():
     assert envs[i].terrain_length == 20  
     assert envs[i].terrain_width == 10 
 
-    heightmap_params = {'length': 1.25, # TODO allow rectangular
-                        'robot_position': 0.5, 
-                        'grid_spacing': 1.0/64.0}
 
     # generate all data in the beginning
     # TODO multithread the stuff in get_observation before I start getting the heightmaps
@@ -124,6 +126,8 @@ def main():
         loss_, info = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx,
                         terrain_loss_coefficient=TERRAIN_LOSS_COEFF, distance_loss_coefficient=DISTANCE_LOSS_COEFF,
                         height_loss_coefficient=HEIGHT_LOSS_COEFF) 
+        for key in ['distance_loss', 'terrain_loss', 'height_loss']:
+            info['train_' + key] = info.pop(key)
 
         if VERBOSE: asdf = time.time()
         if VERBOSE:
@@ -148,9 +152,10 @@ def main():
 
 
         if i%5 == 0:
-            test_losses = eval_agent(agent, config)
-
-            info.update(test_losses)
+            test_info = eval_agent(agent, config)
+            for key in ['distance_loss', 'terrain_loss', 'height_loss']:
+                test_info['test_' + key] = test_info.pop(key)
+            info.update(test_info)
         
         wandb.log(info)
 if __name__ == '__main__':

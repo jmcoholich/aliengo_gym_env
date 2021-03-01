@@ -302,9 +302,9 @@ class Loss:
         loss = distance_loss_coefficient * distance_loss_mean \
                 + terrain_loss_coefficient * terrain_loss_mean \
                 + height_loss_coefficient * height_loss_mean
-        info = {'train_distance_loss': distance_loss_mean.item(),
-                'train_terrain_loss': terrain_loss_mean.item(),
-                'train_height_loss': height_loss_mean.item()}
+        info = {'distance_loss': distance_loss_mean.item(),
+                'terrain_loss': terrain_loss_mean.item(),
+                'height_loss': height_loss_mean.item()}
         return loss, info
 
 
