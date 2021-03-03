@@ -491,8 +491,8 @@ class Aliengo:
         #         x_offset=0.02109375, step_len=0.2, residuals=np.zeros(12) ):
         # residuals are in true joint positions space, not normalized
 
-        lb = np.concatenate((np.array([0.75, 0.075, -0.55, 0.025, -0.1, 0.00]), -np.ones(12) * np.pi/8.0 ))
-        ub = np.concatenate((np.array([2.5, 0.3, -0.35, 0.125, 0.1, 0.4]), np.ones(12) * np.pi/8.0 ))
+        lb = np.concatenate((np.array([0.0, 0.05, -0.6, 0.025, -0.1, 0.00]), -np.ones(12) * np.pi/8.0 ))
+        ub = np.concatenate((np.array([3.0, 0.3, -0.3, 0.125, 0.1, 0.4]), np.ones(12) * np.pi/8.0 ))
         return lb, ub
 
 
