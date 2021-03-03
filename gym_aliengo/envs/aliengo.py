@@ -488,18 +488,19 @@ class Aliengo:
         # 17 dim action space
 
         #  def set_trajectory_parameters(self, t, f=2.00, step_height=0.2, step_bottom=-0.45, lateral_offset=0.075,
-        #         x_offset=0.02109375, residuals=np.zeros(12) ):
+        #         x_offset=0.02109375, step_len=0.2, residuals=np.zeros(12) ):
         # residuals are in true joint positions space, not normalized
 
-        lb = np.concatenate((np.array([0.1, 0.05, -0.6, -0.1, -0.1]), -np.ones(12) * np.pi/8.0 ))
-        ub = np.concatenate((np.array([3.0, 0.4, -0.2, 0.15, 0.1]), np.ones(12) * np.pi/8.0 ))
+        lb = np.concatenate((np.array([0.75, 0.075, -0.55, 0.025, -0.1, 0.00]), -np.ones(12) * np.pi/8.0 ))
+        ub = np.concatenate((np.array([2.5, 0.3, -0.35, 0.125, 0.1, 0.4]), np.ones(12) * np.pi/8.0 ))
         return lb, ub
 
 
     def pmtg_action(self, time, action): #TODO does it make sense to call this every stepSimulation? 
         # its proabably slower to do all the IK and stuff every time (instead of just sending the joint, positions, but 
         # probably fine for now)
-        self.set_trajectory_parameters(time, action[0], action[1], action[2], action[3], action[4], action[5:])
+        self.set_trajectory_parameters(time, action[0], action[1], action[2], action[3], action[4], action[5], 
+                                        action[6:])
 
 
     def get_pmtg_observation_bounds(self):
@@ -672,7 +673,7 @@ class Aliengo:
 
 
     def set_trajectory_parameters(self, t, f=2.00, step_height=0.2, step_bottom=-0.45, lateral_offset=0.075,
-    x_offset=0.02109375, residuals=np.zeros(12) ):
+        x_offset=0.02109375, step_len=0.2, residuals=np.zeros(12)):
         '''Takes parameters of a trot trajectory (defined in this function), a phase variable, and target foot position
         residuals. Calls set_foot_positions() to actuate robot. If only a cyclical phase is given and no foot position
         residuals, the robot will step in place. The frequency is in cycles per second, not radians per second. 
@@ -697,12 +698,13 @@ class Aliengo:
 
         foot_positions = np.zeros((4, 3))
         for i in range(4):
-            z = step_height * self._foot_step_traj(phases[i]) + step_bottom
-            foot_positions[i] = np.array([0, 0, z])
+            z = step_height * self._foot_step_ztraj(phases[i]) + step_bottom
+            x = np.cos(phases[i]) * step_len
+            foot_positions[i] = np.array([x, 0, z])
 
-        foot_positions[[0,2], 1] = -lateral_offset
-        foot_positions[[1,3], 1] = lateral_offset
-        foot_positions[:,0] = x_offset
+        foot_positions[[0,2], 1] -= lateral_offset
+        foot_positions[[1,3], 1] += lateral_offset
+        foot_positions[:,0] += x_offset
         # foot_positions += residuals
         joint_targets = self.set_foot_positions(foot_positions, return_joint_targets=True)
         self.set_joint_position_targets(joint_targets + residuals, true_positions=True)
@@ -718,8 +720,18 @@ class Aliengo:
     #     ub = np.array([0.000001] * 4 + [0.2] * 12) 
     #     return lb, ub
 
+    # def _foot_step_xtraj(self, phase):
+    #     # linearly go from -step_len to step_len. When phase is between pi and 2pi, I should be moving the foot fwd.
+    #     # otherwise, move the foot backwards.
+    #     # Go between [-1, 1]. use a nice sin wave
+    #     if 0.0 <= phase < np.pi:
 
-    def _foot_step_traj(self, phase):
+    #     elif np.pi <= phase <= 2.0 * np.pi:
+
+    #     else:
+    #         raise ValueError('phase is out of bounds')
+
+    def _foot_step_ztraj(self, phase):
         '''Takes a phase scalar and outputs a value [0, 1]. This is according to this formula is S3 here, 
         but normalized to [0, 1]:
         https://robotics.sciencemag.org/content/robotics/suppl/2020/10/19/5.47.eabc5986.DC1/abc5986_SM.pdf'''
@@ -1387,11 +1399,11 @@ def trajectory_generator_test(client, quadruped):
     # quadruped.reset_joint_positions(stochastic=False)
     # time.sleep(2)
     while True:
-        phases, command = quadruped.set_trajectory_parameters(t, f=np.array([-0.0] * 4))
+        quadruped.set_trajectory_parameters(t, f=1.00)
         client.stepSimulation()
         time.sleep(1/240. * 1)
-        if counter% 2 == 0:
-            calculate_tracking_error(command, client, quadruped)
+        # if counter% 2 == 0:
+        #     calculate_tracking_error(command, client, quadruped)
         t += 1/240. 
         counter += 1
 
@@ -1495,7 +1507,7 @@ if __name__ == '__main__':
     plane = client.loadURDF(os.path.join(os.path.dirname(__file__), '../urdf/plane.urdf'))
     # set kp = 1.0 just for when I'm tracking, to eliminate it as a *large* source of error
     quadruped = Aliengo(client, fixed=True, fixed_orientation=[0] * 3, fixed_position=[0.15,-0.15,0.7], kp=1.0, 
-                        vis=False, gait_type='walk')
+                        vis=False, gait_type='trot')
 
     # sine_tracking_test(client, quadruped) 
     # floor_tracking_test(client, quadruped)
