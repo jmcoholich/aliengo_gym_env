@@ -11,15 +11,16 @@ import wandb
 from observation import get_observation
 from agent import TerrainAgent
 from loss import Loss
-from eval_agent import eval_agent
+# from eval_agent import eval_agent
 
 
-N_ENVS = 2
+N_ENVS = 20
 NUM_X = 20 # number of footstep placements along x direction, per env
 NUM_Y = 20 # number of footstep placements along y direction, per env
-N_ENVS_TEST = 3
-NUM_X_TEST = 10
-NUM_Y_TEST = 10
+# N_ENVS_TEST = 3
+# NUM_X_TEST = 10
+# NUM_Y_TEST = 10
+TEST_FRACTION = 0.1
 EPOCHS = 100
 LR = 3e-5
 MAX_GRAD_NORM = 2.0
@@ -31,7 +32,7 @@ TERRAIN_LOSS_COEFF = 10.0
 HEIGHT_LOSS_COEFF = 1.0
 DISTANCE_LOSS_COEFF = 1.0
 VERBOSE = False
-EVAL_INTERVAL = 5
+EVAL_INTERVAL = 1
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 
@@ -53,8 +54,7 @@ def main():
                 'max_grad_norm:': MAX_GRAD_NORM, 'seed': SEED, 'device': DEVICE, 'env': ENV, 
                 'distance_loss_coefficient': DISTANCE_LOSS_COEFF, 'height_loss_coefficient': HEIGHT_LOSS_COEFF, 
                 'terrain_loss_coefficient':TERRAIN_LOSS_COEFF, 'eval_interval': EVAL_INTERVAL, 
-                'n_envs_test': N_ENVS_TEST, 'num_x_test':NUM_X_TEST, 'num_y_test':NUM_Y_TEST, 'env': ENV, 
-                'heightmap_params':heightmap_params} 
+                'env': ENV, 'heightmap_params':heightmap_params, 'test_fraction': TEST_FRACTION} 
     wandb.init(project=WANDB_PROJECT, config=config)
     device = DEVICE
     epochs = EPOCHS
@@ -77,6 +77,11 @@ def main():
     # TODO multithread the stuff in get_observation before I start getting the heightmaps
     foot_positions, foot, heightmaps, x_pos, y_pos, est_robot_base_height, env_idx = get_observation(NUM_X, NUM_Y, envs,
                                                                                     heightmap_params=heightmap_params)
+    # shuffle data
+    perm = torch.randperm(foot.shape[0])
+    for item in [foot_positions, foot, heightmaps, x_pos, y_pos, est_robot_base_height, env_idx]:
+        item = item[perm]
+    split_idx = int((item.shape[0] - 1) * (1 - TEST_FRACTION)) # last TEST_FRACTION of data will be test data
 
 
     # Training #########################################################################################################
@@ -85,20 +90,23 @@ def main():
     loss.to(device)
     del envs
 
+    torch.set_default_dtype(torch.float32)
+
     x_pos = torch.from_numpy(x_pos).type(torch.float32).to(device)
     y_pos = torch.from_numpy(y_pos).type(torch.float32).to(device)
     est_robot_base_height = torch.from_numpy(est_robot_base_height).type(torch.float32).to(device)
     env_idx = torch.from_numpy(env_idx).type(torch.float32).to(device)
 
     # initialize neural network
-    torch.set_default_dtype(torch.float32)
     foot_positions = torch.from_numpy(foot_positions).type(torch.float32).to(device)
     foot = torch.from_numpy(foot).unsqueeze(1).type(torch.float32).to(device)
     heightmaps = torch.from_numpy(heightmaps).unsqueeze(1).type(torch.float32).to(device) # add channel dimension of 1
 
-    means = [foot_positions.mean(axis=0, keepdims=True), foot.mean(), heightmaps.mean()]
+    means = [foot_positions[:split_idx].mean(axis=0, keepdims=True), 
+                foot[:split_idx].mean(), 
+                heightmaps[:split_idx].mean()]
     if foot.shape[0] == 1: raise RuntimeError('batch size must be greater than one in order to calculate std')
-    stds = [foot_positions.std(axis=0, keepdims=True), foot.std(), heightmaps.std()]
+    stds = [foot_positions[:split_idx].std(axis=0, keepdims=True), foot[:split_idx].std(), heightmaps[:split_idx].std()]
     agent = TerrainAgent(means=means, stds=stds).to(device)
     wandb.watch(agent)
     
@@ -112,7 +120,7 @@ def main():
         optimizer.zero_grad()
 
         a = time.time()
-        pred_next_step = agent(foot_positions, foot, heightmaps)
+        pred_next_step = agent(foot_positions[:split_idx], foot[:split_idx], heightmaps[:split_idx])
         
         if VERBOSE:
             print()
@@ -123,9 +131,16 @@ def main():
             print()
 
         if VERBOSE: b = time.time()
-        loss_, info = loss.loss(pred_next_step, foot_positions, foot, x_pos, y_pos, est_robot_base_height, env_idx,
-                        terrain_loss_coefficient=TERRAIN_LOSS_COEFF, distance_loss_coefficient=DISTANCE_LOSS_COEFF,
-                        height_loss_coefficient=HEIGHT_LOSS_COEFF) 
+        loss_, info = loss.loss(pred_next_step, 
+                                foot_positions[:split_idx], 
+                                foot[:split_idx], 
+                                x_pos[:split_idx], 
+                                y_pos[:split_idx], 
+                                est_robot_base_height[:split_idx], 
+                                env_idx[:split_idx],
+                                terrain_loss_coefficient=TERRAIN_LOSS_COEFF, 
+                                distance_loss_coefficient=DISTANCE_LOSS_COEFF,
+                                height_loss_coefficient=HEIGHT_LOSS_COEFF) 
         for key in ['distance_loss', 'terrain_loss', 'height_loss']:
             info['train_' + key] = info.pop(key)
 
@@ -151,8 +166,19 @@ def main():
             print('optimizer step time: {:.4f}'.format(e-d))
 
 
-        if i%5 == 0:
-            test_info = eval_agent(agent, config)
+        if i%EVAL_INTERVAL == 0:
+            with torch.no_grad():
+                pred_next_step = agent(foot_positions[split_idx:], foot[split_idx:], heightmaps[split_idx:])
+                _, test_info = loss.loss(pred_next_step, 
+                                    foot_positions[split_idx:], 
+                                    foot[split_idx:], 
+                                    x_pos[split_idx:], 
+                                    y_pos[split_idx:], 
+                                    est_robot_base_height[split_idx:], 
+                                    env_idx[split_idx:],
+                                    terrain_loss_coefficient=TERRAIN_LOSS_COEFF, 
+                                    distance_loss_coefficient=DISTANCE_LOSS_COEFF,
+                                    height_loss_coefficient=HEIGHT_LOSS_COEFF) 
             for key in ['distance_loss', 'terrain_loss', 'height_loss']:
                 test_info['test_' + key] = test_info.pop(key)
             info.update(test_info)

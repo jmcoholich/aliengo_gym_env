@@ -19,7 +19,7 @@ def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483,
     assert x_pos.shape == y_pos.shape
     n = x_pos.shape[0] # this is the batch size
     assert n == num_x * num_y * num_envs
-    print('Generating {} footstep placements ({} envs * {} x-positions * {} y-positions)'.\
+    print('\n\nGenerating {} footstep placements ({} envs * {} x-positions * {} y-positions)'.\
                                                                                     format(n, num_envs, num_x, num_y))
 
     # Generate foot placements##########################################################################################
