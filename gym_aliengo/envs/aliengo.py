@@ -14,7 +14,7 @@ class Aliengo:
     def __init__(self, 
                     pybullet_client, 
                     max_torque=44.4, # from URDF 
-                    kp=0.1,  
+                    kp=1.0,  
                     kd=1.0, 
                     fixed=False, 
                     fixed_position=[0,0,1.0], 
@@ -485,43 +485,56 @@ class Aliengo:
 
 
     def get_observation_bounds(self):
-        raise NotImplementedError
-        torque_lb, torque_ub = self.get_joint_torque_bounds()
-        position_lb, position_ub = self.get_joint_position_bounds()
-        velocity_lb, velocity_ub = self.get_joint_velocity_bounds()
-        observation_lb = np.concatenate((torque_lb, 
-                                        position_lb,
-                                        velocity_lb, 
-                                        -0.78 * np.ones(4), # this is for base orientation in quaternions
-                                        np.zeros(4), # foot normal forces
-                                        -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
-                                        -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
+        # NOTE I have determined observation bounds are not used for anything lol
+        # torque_lb, torque_ub = self.get_joint_torque_bounds()
+        # position_lb, position_ub = self.get_joint_position_bounds()
+        # velocity_lb, velocity_ub = self.get_joint_velocity_bounds()
+        # observation_lb = np.concatenate((torque_lb, 
+        #                                 position_lb,
+        #                                 velocity_lb, 
+        #                                 -0.78 * np.ones(4), # this is for base orientation in quaternions
+        #                                 np.zeros(4), # foot normal forces
+        #                                 -1e5 * np.ones(3), # cartesian acceleration (arbitrary bound)
+        #                                 -1e5 * np.ones(3))) # angular velocity (arbitrary bound)
 
-        observation_ub = np.concatenate((torque_ub, 
-                                        position_ub, 
-                                        velocity_ub, 
-                                        0.78 * np.ones(4),
-                                        1e4 * np.ones(4), # arbitrary bound
-                                        1e5 * np.ones(3),
-                                        1e5 * np.ones(3)))
+        # observation_ub = np.concatenate((torque_ub, 
+        #                                 position_ub, 
+        #                                 velocity_ub, 
+        #                                 0.78 * np.ones(4),
+        #                                 1e4 * np.ones(4), # arbitrary bound
+        #                                 1e5 * np.ones(3),
+        #                                 1e5 * np.ones(3)))
 
-        return observation_lb, observation_ub
+        return -np.ones(50), np.ones(50)
     
 
     def get_observation(self):
-        
-        raise NotImplementedError
+        # observation dim is 12 * 3 + 4 + 4 + 3 + 3 = 50
         if not self.state_is_updated:
             raise ValueError('State has not been updated since last "get observation" call.')
-        # self.state = np.concatenate((self.applied_torques, 
-        #                                     self._positions_to_actions(self.joint_positions),
-        #                                     self.joint_velocities,
-        #                                     self.base_orientation,
-        #                                     self.foot_normal_forces,
-        #                                     self.cartesian_base_accel,
-        #                                     self.base_twist[3:])) # last item is base angular velocity
+        obs = np.concatenate((self.applied_torques, 
+                            self._positions_to_actions(self.joint_positions),
+                            self.joint_velocities,
+                            self.base_orientation,
+                            self.foot_normal_forces,
+                            self.base_vel,
+                            self.base_avel)) 
         self.state_is_updated = False
+        return obs
 
+
+    def reward(self):
+        # for regular flat implementation
+
+        vel_cap = 1.0
+
+        fwd_rew = np.clip(self.base_vel[0], -vel_cap, vel_cap)
+        torque_rew = -np.linalg.norm(self.applied_torques)
+
+        rew_dict = {'fwd_rew': fwd_rew, 'torque_rew': torque_rew, 'x_vel', self.base_vel[0]}
+
+        rew = fwd_rew + 0.001 * torque_rew
+        return rew, rew_dict
     
     def get_privileged_info(self, fake_client=None, flat_ground=False, ray_start=100):
         ''' 
