@@ -14,14 +14,14 @@ from loss import Loss
 # from eval_agent import eval_agent
 
 
-N_ENVS = 20
-NUM_X = 20 # number of footstep placements along x direction, per env
-NUM_Y = 20 # number of footstep placements along y direction, per env
+N_ENVS = 2
+NUM_X = 50 # number of footstep placements along x direction, per env
+NUM_Y = 50 # number of footstep placements along y direction, per env
 # N_ENVS_TEST = 3
 # NUM_X_TEST = 10
 # NUM_Y_TEST = 10
 TEST_FRACTION = 0.1
-EPOCHS = 100
+EPOCHS = 1000
 LR = 3e-5
 MAX_GRAD_NORM = 2.0
 WANDB_PROJECT = 'terrain_agent_pretrain'
@@ -31,7 +31,7 @@ ENV = 'gym_aliengo:AliengoSteps-v0'
 TERRAIN_LOSS_COEFF = 10.0
 HEIGHT_LOSS_COEFF = 1.0
 DISTANCE_LOSS_COEFF = 1.0
-VERBOSE = False
+VERBOSE = True
 EVAL_INTERVAL = 1
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -41,7 +41,6 @@ torch.manual_seed(SEED)
 TODO add noise to the observations
 TODO switch to an nn that outputs a mean and std to sample from, so that I can train this with PPO instead.
 TODO implement minibatches
-TODO generate large test set in advance
 '''
 
 
@@ -63,6 +62,7 @@ def main():
     # Data Generation ##################################################################################################
     # create several envs of varying difficulty
     envs = [''] * N_ENVS
+    if VERBOSE: print('#'*100 + '\nGenerating {} envs...\n'.format(N_ENVS) + '#'*100)
     for i in range(len(envs)):
         envs[i] = gym.make(ENV, # NOTE changing env type will break code
                         rows_per_m=np.random.uniform(1.0, 5.0),
@@ -71,12 +71,14 @@ def main():
                         fixed_position=[-10,0,1.0])
     assert envs[i].terrain_length == 20  
     assert envs[i].terrain_width == 10 
+    if VERBOSE: print('#'*100 + '\nFinished Generating {} envs...\n'.format(N_ENVS)+ '#'*100)
 
 
     # generate all data in the beginning
     # TODO multithread the stuff in get_observation before I start getting the heightmaps
     foot_positions, foot, heightmaps, x_pos, y_pos, est_robot_base_height, env_idx = get_observation(NUM_X, NUM_Y, envs,
                                                                                     heightmap_params=heightmap_params)
+    if VERBOSE: print('#'*100 + '\nFinished Generating Observations...\n'.format(N_ENVS)+ '#'*100)
     # shuffle data
     perm = torch.randperm(foot.shape[0])
     for item in [foot_positions, foot, heightmaps, x_pos, y_pos, est_robot_base_height, env_idx]:
@@ -87,6 +89,7 @@ def main():
     # Training #########################################################################################################
     # initialize loss object
     loss = Loss(envs, device)
+    if VERBOSE: print('#'*100 + '\nFinished Initializing loss object...\n'.format(N_ENVS)+ '#'*100)
     loss.to(device)
     del envs
 

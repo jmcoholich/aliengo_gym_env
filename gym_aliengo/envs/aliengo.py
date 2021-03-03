@@ -589,7 +589,7 @@ class Aliengo:
                                 np.expand_dims(np.stack((r * np.cos(x), r * np.sin(x))).swapaxes(0,1), 0)).reshape((4*n, 2))
             ray_start_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * ray_start), axis=1)
             ray_end_pos = np.concatenate((scan_positions, np.ones((4*n, 1)) * -1), axis=1)
-            raw = fake_client.rayTestBatch(rayFromPositions=ray_start_pos, rayToPositions=ray_end_pos)
+            raw = fake_client.rayTestBatch(rayFromPositions=ray_start_pos, rayToPositions=ray_end_pos, numThreads=0)
             relative_z = np.array([raw[i][3][2] - (foot_pos[j][2] - 0.0265) for j in range(4)\
                                                                                      for i in range(j * n, (j+1) * n)])
             
@@ -996,7 +996,7 @@ class Aliengo:
         coor_list = coordinates.reshape((2, grid_len**2)).swapaxes(0, 1) # is now shape (grid_len**2,2) 
         ray_start = np.append(coor_list, np.ones((grid_len**2, 1)) * ray_start_height, axis=1) #TODO check that this and in general the values are working properly
         ray_end = np.append(coor_list, np.zeros((grid_len**2, 1)) - 1, axis=1)
-        raw_output = client.rayTestBatch(ray_start, ray_end) # this should be the fake_client, without the quadruped
+        raw_output = client.rayTestBatch(ray_start, ray_end, numThreads=0) # this should be the fake_client, without the quadruped
         z_heights = np.array([raw_output[i][3][2] for i in range(grid_len**2)])
         relative_z_heights = z_heights - base_z
 

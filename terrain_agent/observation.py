@@ -63,7 +63,8 @@ def get_observation(num_x, num_y, envs, foot=None, rayFromZ=100.0, x_span=0.483,
         rayToPositions = rayFromPositions.copy()        
         rayToPositions[:, :, 2] = -1.0
         raw = envs[i].fake_client.rayTestBatch(rayFromPositions=rayFromPositions.reshape(num_x * num_y * 4, 3), 
-                                            rayToPositions=rayToPositions.reshape(num_x * num_y * 4, 3))
+                                            rayToPositions=rayToPositions.reshape(num_x * num_y * 4, 3),
+                                            numThreads=0)
         assert len(raw) == num_x * num_y * 4
         output[start:end, :, 2] += np.array([raw[i][3][2] for i in range(len(raw))]).reshape((num_x * num_y, 4))
 
