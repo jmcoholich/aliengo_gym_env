@@ -531,7 +531,7 @@ class Aliengo:
         fwd_rew = np.clip(self.base_vel[0], -vel_cap, vel_cap)
         torque_rew = -np.linalg.norm(self.applied_torques)
 
-        rew_dict = {'fwd_rew': fwd_rew, 'torque_rew': torque_rew, 'x_vel', self.base_vel[0]}
+        rew_dict = {'fwd_rew': fwd_rew, 'torque_rew': torque_rew, 'x_vel': self.base_vel[0]}
 
         rew = fwd_rew + 0.001 * torque_rew
         return rew, rew_dict
