@@ -453,35 +453,65 @@ class Aliengo:
         return observation_lb, observation_ub
 
 
-    def get_pmtg_observation(self):
-        '''Returns the observation for PMTG control. Observation consists of sin(phase) and cos(phase) for each leg, 
-        4D IMU data, last position targets'''
+    # def get_pmtg_observation(self):
+    #     '''Returns the observation for PMTG control. Observation consists of sin(phase) and cos(phase) for each leg, 
+    #     4D IMU data, last position targets'''
 
-        if not self.state_is_updated:
-            raise ValueError('State has not been updated since last "get observation" call.')
-        imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], self.base_avel[:-1]))
-        # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
-        imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
-        observation = np.concatenate((np.sin(self.phases),
-                                    np.cos(self.phases), 
-                                    imu,
-                                    self.foot_target_history[0].flatten()))
-        self.state_is_updated = False
-        return observation
+    #     if not self.state_is_updated:
+    #         raise ValueError('State has not been updated since last "get observation" call.')
+    #     imu = np.concatenate((self.client.getEulerFromQuaternion(self.base_orientation)[:-1], self.base_avel[:-1]))
+    #     # std of pitch and roll noise is 0.9 deg, std of pitch rate and roll rate is 1.8 deg/s
+    #     imu += np.random.randn(4) * np.array([np.pi/2. * 0.01]*2 + [np.pi * 0.01]*2) 
+    #     observation = np.concatenate((np.sin(self.phases),
+    #                                 np.cos(self.phases), 
+    #                                 imu,
+    #                                 self.foot_target_history[0].flatten()))
+    #     self.state_is_updated = False
+    #     return observation
   
 
-    def get_pmtg_observation_bounds(self):
-        '''Observation consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets. 
-        Bounds for IMU and last foot position commands are somewhat guesses. I don't think it matters much. '''
+    # def get_pmtg_observation_bounds(self):
+    #     '''Observation consists of sin(phase) and cos(phase) for each leg, 4D IMU data, last position targets. 
+    #     Bounds for IMU and last foot position commands are somewhat guesses. I don't think it matters much. '''
 
-        observation_ub = np.concatenate((np.ones(8), 
-                                        np.array([np.pi/2.0, np.pi/2.0, 1e5, 1e5]), # pitch, roll, pitch rate, roll rate
-                                        np.ones(12)*2)) # last foot position commands
-        return -observation_ub, observation_ub
+    #     observation_ub = np.concatenate((np.ones(8), 
+    #                                     np.array([np.pi/2.0, np.pi/2.0, 1e5, 1e5]), # pitch, roll, pitch rate, roll rate
+    #                                     np.ones(12)*2)) # last foot position commands
+    #     return -observation_ub, observation_ub
 
     
-    def get_hutter_pmtg_action_bounds(self):
-        return self.get_pmtg_action_bounds()
+    # def get_hutter_pmtg_action_bounds(self):
+    #     return self.get_pmtg_action_bounds()
+
+
+    def get_pmtg_action_bounds(self): 
+        # 17 dim action space
+
+        #  def set_trajectory_parameters(self, t, f=2.00, step_height=0.2, step_bottom=-0.45, lateral_offset=0.075,
+        #         x_offset=0.02109375, residuals=np.zeros(12) ):
+        # residuals are in true joint positions space, not normalized
+
+        lb = np.concatenate((np.array([0.1, 0.05, -0.6, -0.1, -0.1]), -np.ones(12) * np.pi/8.0 ))
+        ub = np.concatenate((np.array([3.0, 0.4, -0.2, 0.15, 0.1]), np.ones(12) * np.pi/8.0 ))
+        return lb, ub
+
+
+    def pmtg_action(self, time, action): #TODO does it make sense to call this every stepSimulation? 
+        # its proabably slower to do all the IK and stuff every time (instead of just sending the joint, positions, but 
+        # probably fine for now)
+        self.set_trajectory_parameters(time, action[0], action[1], action[2], action[3], action[4], action[5:])
+
+
+    def get_pmtg_observation_bounds(self):
+        # same as regular flat observation, just with the sin and cos of trajectory generator phases added on.
+        return -np.ones(58), np.ones(58)
+
+
+    def get_pmtg_observation(self):
+        obs = self.get_observation()
+        obs = np.concatenate((obs, np.sin(self.phases), np.cos(self.phases)))
+        return obs
+
 
 
     def get_observation_bounds(self):
@@ -641,33 +671,29 @@ class Aliengo:
         return self.link_masses
 
 
-    def set_trajectory_parameters(self, t, f=np.zeros(4), residuals=np.zeros((4, 3))):
+    def set_trajectory_parameters(self, t, f=2.00, step_height=0.2, step_bottom=-0.45, lateral_offset=0.075,
+    x_offset=0.02109375, residuals=np.zeros(12) ):
         '''Takes parameters of a trot trajectory (defined in this function), a phase variable, and target foot position
         residuals. Calls set_foot_positions() to actuate robot. If only a cyclical phase is given and no foot position
         residuals, the robot will step in place. The frequency is in cycles per second, not radians per second. 
         The foot z position represents the BOTTOM of the collision sphere'''
 
-        # other trajectory parameters
-        step_height = 0.2 # from paper
-        step_bottom = -0.45 # from paper
-        lateral_offset = 0.075 # how much to push the feet out 
-        x_offset = 0.02109375 # experimental, close to balance 
+        # # other trajectory parameters
+        # step_height = 0.2 # from paper
+        # step_bottom = -0.45 # from paper
+        # lateral_offset = 0.075 # how much to push the feet out 
+        # x_offset = 0.02109375 # experimental, close to balance 
 
         assert t >= 0
-        assert f.size == 4
-        assert residuals.shape == (4,3)
         if self.gait_type == 'trot':
             phase_offsets = np.array([0, np.pi, np.pi, 0])
-            f0 = 2.00 # 1.25 is from paper
         elif self.gait_type == 'walk':
             # phase_offsets = np.array([1.5, 0.5, 1.0, 0])  * np.pi #FR, FL, RR, RL
             phase_offsets = np.array([0.0, 1.0, 0.5, 1.5]) * np.pi #FR, FL, RR, RL
             # phase_offsets = np.array([np.pi,0,0,0]) #FR, FL, RR, RL
-            f0 = 1.0 # 1.25 is from paper
 
-        phases = (phase_offsets + (f0 + f) * 2 * np.pi * t) % (2 * np.pi)
+        phases = (phase_offsets + f * 2 * np.pi * t) % (2 * np.pi)
         self.phases = phases
-        self.f_i = f
 
         foot_positions = np.zeros((4, 3))
         for i in range(4):
@@ -677,19 +703,20 @@ class Aliengo:
         foot_positions[[0,2], 1] = -lateral_offset
         foot_positions[[1,3], 1] = lateral_offset
         foot_positions[:,0] = x_offset
-        foot_positions += residuals
-        self.set_foot_positions(foot_positions)
-        return phases, foot_positions # foot positions is the command in foot frame space
+        # foot_positions += residuals
+        joint_targets = self.set_foot_positions(foot_positions, return_joint_targets=True)
+        self.set_joint_position_targets(joint_targets + residuals, true_positions=True)
+        # return phases, foot_positions # foot positions is the command in foot frame space
 
 
-    def get_pmtg_action_bounds(self):
-        '''Returns bounds of actions to set_trajectory_parameters. I don't really know what these should be. (I don't
-        think it matters.)'''
+    # def get_pmtg_action_bounds(self):
+    #     '''Returns bounds of actions to set_trajectory_parameters. I don't really know what these should be. (I don't
+    #     think it matters.)'''
 
-        # frequency adjustments, then foot position residuals
-        lb = np.array([-0.00001] * 4 + [-0.2] * 12) # TODO
-        ub = np.array([0.000001] * 4 + [0.2] * 12) 
-        return lb, ub
+    #     # frequency adjustments, then foot position residuals
+    #     lb = np.array([-0.00001] * 4 + [-0.2] * 12) # TODO
+    #     ub = np.array([0.000001] * 4 + [0.2] * 12) 
+    #     return lb, ub
 
 
     def _foot_step_traj(self, phase):

@@ -123,10 +123,10 @@ class AliengoEnv(gym.Env):
 
         if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
             # f = action[:4]
-            f = np.tile(action[0], 4) #TODO decide whether or not to keep this
-            residuals = action[4:].reshape((4,3))
+            # residuals = action[4:].reshape((4,3))
             for _ in range(self.n_hold_frames):
-                self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
+                # self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
+                self.quadruped.pmtg_action(self.t, action)
                 self.t += 1./240.
                 self.client.stepSimulation()
                 if self.vis: self.quadruped.visualize()
@@ -160,7 +160,7 @@ class AliengoEnv(gym.Env):
         info.update(termination_dict) # termination_dict is an empty dict if not done
 
         if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg']:
-            rew, rew_dict = self.quadruped.pmtg_reward()
+            rew, rew_dict = self.quadruped.reward()
         elif self.env_mode == 'flat':
             # raise NotImplementedError
             rew, rew_dict = self.quadruped.reward()
