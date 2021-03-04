@@ -491,8 +491,8 @@ class Aliengo:
         #         x_offset=0.02109375, step_len=0.2, residuals=np.zeros(12) ):
         # residuals are in true joint positions space, not normalized
 
-        lb = np.concatenate((np.array([0.0, 0.05, -0.6, 0.025, -0.1, 0.00]), -np.ones(12) * np.pi/8.0 ))
-        ub = np.concatenate((np.array([3.0, 0.3, -0.3, 0.125, 0.1, 0.4]), np.ones(12) * np.pi/8.0 ))
+        lb = np.concatenate((np.array([1.25, 0.075, -0.5, 0.04, -0.05, 0.05]), -np.ones(12) * np.pi/16.0 ))
+        ub = np.concatenate((np.array([2.25, 0.25, -0.35, 0.125, 0.05, 0.2]), np.ones(12) * np.pi/16.0 ))
         return lb, ub
 
 
@@ -557,7 +557,7 @@ class Aliengo:
     def reward(self):
         # for regular flat implementation
 
-        vel_cap = 1.0
+        vel_cap = 0.5
 
         fwd_rew = np.clip(self.base_vel[0], -vel_cap, vel_cap)
         torque_rew = -np.linalg.norm(self.applied_torques)
