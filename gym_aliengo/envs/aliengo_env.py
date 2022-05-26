@@ -20,7 +20,7 @@ class AliengoEnv(gym.Env):
     def __init__(self, 
                     render=False, 
                     env_mode='pmtg',
-                    apply_perturb=True,
+                    apply_perturb=False,
                     avg_time_per_perturb=5.0, # seconds
                     action_repeat=4,
                     timeout=60.0, # number of seconds to timeout after
@@ -107,14 +107,14 @@ class AliengoEnv(gym.Env):
 
 
     def step(self, action):
-        if (np.random.rand() < self.perturb_p) and self.apply_perturb: 
-            '''TODO eventually make disturbance generating function that applies disturbances for multiple timesteps'''
-            if np.random.rand() > 0.5:
-                # TODO returned values will be part of privledged information for teacher training
-                force, foot = self.quadruped.apply_foot_disturbance() 
-            else:
-                # TODO returned values will be part of privledged information for teacher training
-                wrench = self.quadruped.apply_torso_disturbance()
+        # if (np.random.rand() < self.perturb_p) and self.apply_perturb: 
+        #     '''TODO eventually make disturbance generating function that applies disturbances for multiple timesteps'''
+        #     if np.random.rand() > 0.5:
+        #         # TODO returned values will be part of privledged information for teacher training
+        #         force, foot = self.quadruped.apply_foot_disturbance() 
+        #     else:
+        #         # TODO returned values will be part of privledged information for teacher training
+        #         wrench = self.quadruped.apply_torso_disturbance()
 
         DELTA = 0.01
         if not ((self.action_lb - DELTA <= action) & (action <= self.action_ub + DELTA)).all():
@@ -123,10 +123,10 @@ class AliengoEnv(gym.Env):
 
         if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg'] :
             # f = action[:4]
-            f = np.tile(action[0], 4) #TODO decide whether or not to keep this
-            residuals = action[4:].reshape((4,3))
+            # residuals = action[4:].reshape((4,3))
             for _ in range(self.n_hold_frames):
-                self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
+                # self.quadruped.set_trajectory_parameters(self.t, f=f, residuals=residuals)
+                self.quadruped.pmtg_action(self.t, action)
                 self.t += 1./240.
                 self.client.stepSimulation()
                 if self.vis: self.quadruped.visualize()
@@ -160,10 +160,10 @@ class AliengoEnv(gym.Env):
         info.update(termination_dict) # termination_dict is an empty dict if not done
 
         if self.env_mode in ['pmtg', 'hutter_pmtg', 'hutter_teacher_pmtg']:
-            rew, rew_dict = self.quadruped.pmtg_reward()
+            rew, rew_dict = self.quadruped.reward()
         elif self.env_mode == 'flat':
-            raise NotImplementedError
-            # rew, rew_dict = self.quadruped.reward()
+            # raise NotImplementedError
+            rew, rew_dict = self.quadruped.reward()
         else: assert False
         self.update_mean_rew_dict(rew_dict)
 
@@ -189,7 +189,7 @@ class AliengoEnv(gym.Env):
             assert False
             
 
-    def reset(self, base_height=0.48, stochastic=True): 
+    def reset(self, base_height=0.48, stochastic=True): #TODO make it so that I apply the torque at every simulation step
         '''Resets the robot to a neutral standing position, knees slightly bent. The motor control command is to 
         prevent the robot from jumping/falling on first user command. '''
 
